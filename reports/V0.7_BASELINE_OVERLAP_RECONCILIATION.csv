@@ -1,0 +1,8 @@
+artifact,status,rows_left,rows_rebuilt,max_numeric_abs_diff,differing_columns
+base_target_weights.parquet,PASS,1180,1180,0.0,
+asset_selection.parquet,PASS,1180,1180,0.0,
+momentum_signals.parquet,PASS,23816,23816,0.0,
+volatility_estimates.parquet,PASS,23816,23816,0.0,
+single_asset_vol_control.parquet,PASS,22161,22161,0.0,
+final_daily_weights.parquet,PASS,24420,24420,0.0,
+portfolio_daily.parquet,PASS,2220,2220,0.0,

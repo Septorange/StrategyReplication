@@ -12,6 +12,10 @@ def test_research_workstation_navigation_and_demo_off():
     for x in ['表现与胜率','年度收益归因','持仓与风险','回撤研究','risk_budget_vol_window','short_vol_windows','momentum_excluded_count',"analytics('history'",'/api/experiment/parameters','data-export-png','sensitivityParam']:
         assert x in html+js
     assert 'V0.6 ANALYTICS · 待独立审计' in html
+    assert 'const modeAPageIds=' in js and 'const modeBPageIds=' in js
+    assert 'const modeBPageIds=[5]' in js
+    assert 'visible.map((pageId,index)' in js
+    assert 'String(index+1).padStart(2' in js
 
 def test_research_context_is_global_and_experiment_uses_api():
     for x in ['strategyVersion','selectedDate','fromDate','toDate','selectedAsset','selectedEventId']:

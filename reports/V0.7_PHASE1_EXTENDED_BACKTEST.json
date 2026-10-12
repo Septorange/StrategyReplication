@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "strategy_snapshot_id": "v07_extended_10119bd207b16499",
+  "raw_latest": "2026-09-24",
+  "phase2_latest": "2026-09-24",
+  "phase3a_latest": "2026-08-31",
+  "phase3b_latest": "2026-09-24",
+  "formal_overlap_status": "PASS",
+  "new_period_data_quality": "PASS",
+  "published": false
+}

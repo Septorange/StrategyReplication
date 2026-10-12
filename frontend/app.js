@@ -48,8 +48,13 @@ function table(rows, columns){
 }
 
 function nav(){
-  const visible=state.mode==='A'?[0,8,9,10,11,1,2,3,4,7]:[5,6];
-  $('#nav').innerHTML=visible.map(i=>`<button type="button" data-page="${i}" class="${i===state.page?'active':''}"><span class="nav-index">${String(i+1).padStart(2,'0')}</span><span>${PAGES[i][0]}</span></button>`).join('');
+  // Page ids are internal and stable; display numbers are positions in the
+  // currently visible mode list. The old version-comparison page remains in
+  // source for provenance, but is intentionally not a user-facing route.
+  const modeAPageIds=[0,8,9,10,11,1,2,3,4,7];
+  const modeBPageIds=[5];
+  const visible=state.mode==='A'?modeAPageIds:modeBPageIds;
+  $('#nav').innerHTML=visible.map((pageId,index)=>`<button type="button" data-page="${pageId}" class="${pageId===state.page?'active':''}"><span class="nav-index">${String(index+1).padStart(2,'0')}</span><span>${PAGES[pageId][0]}</span></button>`).join('');
   $$('#nav button').forEach(b=>b.addEventListener('click',()=>goToPage(Number(b.dataset.page))));
   $$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===state.mode);b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode));});
   $('#title').textContent=PAGES[state.page][0];$('#subtitle').textContent=PAGES[state.page][1];
