@@ -13,6 +13,12 @@ from .config import ROOT
 
 DB_PATH = ROOT / 'experiment_library.sqlite3'
 
+REQUIRED_ARTIFACTS = {
+    'daily_portfolio.parquet', 'single_asset_vol_control.parquet',
+    'final_daily_weights.parquet', 'events.parquet',
+    'experiment_trade_returns.parquet', 'engine_run.json',
+}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -120,9 +126,19 @@ class ExperimentLibrary:
             item=self._saved_row(row)
             path=Path(row['artifact_path'])
             manifest=path/'artifact_manifest.json'
-            if item.get('status') == 'PASS' and not manifest.is_file():
+            manifest_data = None
+            if manifest.is_file():
+                try:
+                    manifest_data = json.loads(manifest.read_text())
+                except (OSError, json.JSONDecodeError):
+                    manifest_data = None
+            stage_digests = manifest_data.get('artifact_sha256') if isinstance(manifest_data, dict) else None
+            certified = (isinstance(stage_digests, dict)
+                         and REQUIRED_ARTIFACTS.issubset(stage_digests)
+                         and all((path / name).is_file() for name in REQUIRED_ARTIFACTS))
+            if item.get('status') == 'PASS' and not certified:
                 item['status']='LEGACY_UNVERIFIED'
-                item['integrity_note']='旧实验产物缺少 Phase 2 artifact manifest，不能自动复用或比较。'
+                item['integrity_note']='旧实验产物缺少完整 Phase 2 artifact manifest 或阶段文件，不能自动复用或比较。'
             items.append(item)
         return items
 
@@ -193,18 +209,13 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
     recomputed=hashlib.sha256(json.dumps(identity_payload,sort_keys=True).encode()).hexdigest()
     if recomputed!=identity:
         raise ValueError('Saved artifact full identity digest is invalid.')
-    required_artifacts = {
-        'daily_portfolio.parquet', 'single_asset_vol_control.parquet',
-        'final_daily_weights.parquet', 'events.parquet',
-        'experiment_trade_returns.parquet', 'engine_run.json',
-    }
-    missing = sorted(name for name in required_artifacts if not (path / name).is_file())
+    missing = sorted(name for name in REQUIRED_ARTIFACTS if not (path / name).is_file())
     if missing:
         raise FileNotFoundError('Saved experiment stage artifacts are missing: ' + ', '.join(missing))
     artifact_hashes = manifest.get('artifact_sha256')
     if not isinstance(artifact_hashes, dict):
         raise ValueError('Saved artifact manifest lacks stage file digests; legacy artifact is not certified.')
-    for name in required_artifacts:
+    for name in REQUIRED_ARTIFACTS:
         digest = artifact_hashes.get(name)
         if not isinstance(digest, str) or hashlib.sha256((path / name).read_bytes()).hexdigest() != digest:
             raise ValueError(f'Saved experiment stage artifact digest is invalid: {name}')
