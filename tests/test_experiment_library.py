@@ -68,14 +68,18 @@ def test_saved_artifact_must_match_sqlite_identity_and_cache_alias(tmp_path):
                   'identity_sha256': identity, 'cache_key': identity[:16], 'adapter_version': 4}
         result_path=artifact / 'result.json'
         result_path.write_text(json.dumps(result))
-        (artifact/'artifact_manifest.json').write_text(json.dumps({
-            'identity_sha256':identity,'config_hash':identity,'snapshot_id':'V6_FORMAL',
-            'cache_key':identity[:16],'adapter_version':4,
-            'result_sha256':hashlib.sha256(result_path.read_bytes()).hexdigest()}))
         for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
                      'final_daily_weights.parquet','events.parquet',
                      'experiment_trade_returns.parquet','engine_run.json'):
             (artifact/name).touch()
+        (artifact/'artifact_manifest.json').write_text(json.dumps({
+            'identity_sha256':identity,'config_hash':identity,'snapshot_id':'V6_FORMAL',
+            'cache_key':identity[:16],'adapter_version':4,
+            'result_sha256':hashlib.sha256(result_path.read_bytes()).hexdigest(),
+            'artifact_sha256': {name: hashlib.sha256((artifact/name).read_bytes()).hexdigest()
+                                for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
+                                             'final_daily_weights.parquet','events.parquet',
+                                             'experiment_trade_returns.parquet','engine_run.json')}}))
         library = ExperimentLibrary(tmp_path / 'library.sqlite3')
         run_id = library.add_run(run_id=f'run_{identity}',config_hash=identity, snapshot_id='V6_FORMAL', status='PASS',
                                  config=config, artifact_path=artifact)
@@ -107,8 +111,13 @@ def test_same_run_is_locked_and_atomically_published_once(tmp_path, monkeypatch)
         (output / 'result.json').write_text(json.dumps({
             'status': 'PASS', 'synthetic': False, 'config': request['config'],
             'baseline': request['baseline'], 'snapshot_id': request['snapshot_id'],
-            'identity_sha256': request['identity_sha256'], 'cache_key': request['cache_key'],
+            'config_hash': request['identity_sha256'], 'identity_sha256': request['identity_sha256'],
+            'cache_key': request['cache_key'], 'adapter_version': 4,
         }))
+        for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
+                     'final_daily_weights.parquet','events.parquet',
+                     'experiment_trade_returns.parquet'):
+            (output / name).touch()
         return SimpleNamespace(returncode=0, stdout='ok', stderr='')
 
     monkeypatch.setattr(runner_module.subprocess, 'run', fake_subprocess_run)

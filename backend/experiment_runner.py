@@ -163,9 +163,4 @@ class ExperimentRunner:
         # Publish into an absent alias atomically. Never delete an existing
         # directory: it may belong to a different full hash with the same alias.
         os.rename(temp_dir,dest)
-        final_request=dest/'request.json'
-        final_cmd=['/usr/bin/arch','-arm64',str(V6_PYTHON),str(ROOT/'scripts/run_v6_experiment.py'),str(final_request),str(dest)]
-        engine_record['command']=final_cmd
-        engine_record['published_artifact_path']=str(dest)
-        (dest/'engine_run.json').write_text(json.dumps(engine_record,ensure_ascii=False,indent=2)+'\n')
         return payload
