@@ -154,7 +154,11 @@ class ExperimentRunner:
         result_file.write_text(json.dumps(payload,ensure_ascii=False,allow_nan=False)+'\n')
         manifest={'identity_sha256':identity_sha256,'config_hash':identity_sha256,
                   'snapshot_id':snapshot_id,'cache_key':key,'adapter_version':4,
-                  'result_sha256':hashlib.sha256(result_file.read_bytes()).hexdigest()}
+                  'result_sha256':hashlib.sha256(result_file.read_bytes()).hexdigest(),
+                  'artifact_sha256': {name: hashlib.sha256((temp_dir/name).read_bytes()).hexdigest()
+                                      for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
+                                                   'final_daily_weights.parquet','events.parquet',
+                                                   'experiment_trade_returns.parquet','engine_run.json')}}
         (temp_dir/'artifact_manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
         # Publish into an absent alias atomically. Never delete an existing
         # directory: it may belong to a different full hash with the same alias.

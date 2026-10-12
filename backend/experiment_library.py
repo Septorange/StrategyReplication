@@ -109,13 +109,22 @@ class ExperimentLibrary:
 
     def list_saved(self) -> list[dict[str, Any]]:
         with self._connect() as db:
-            rows = db.execute('''SELECT s.*, r.config_hash, r.snapshot_id, r.status, r.config_json,
+            rows = db.execute('''SELECT s.*, r.config_hash, r.snapshot_id, r.status, r.config_json, r.artifact_path,
                                        e.from_date, e.to_date, e.metrics_json
                                   FROM saved_experiments s
                                   JOIN experiment_runs r USING(run_id)
                                   JOIN experiment_evaluations e USING(evaluation_id)
                                  ORDER BY s.created_at DESC''').fetchall()
-        return [self._saved_row(row) for row in rows]
+        items=[]
+        for row in rows:
+            item=self._saved_row(row)
+            path=Path(row['artifact_path'])
+            manifest=path/'artifact_manifest.json'
+            if item.get('status') == 'PASS' and not manifest.is_file():
+                item['status']='LEGACY_UNVERIFIED'
+                item['integrity_note']='旧实验产物缺少 Phase 2 artifact manifest，不能自动复用或比较。'
+            items.append(item)
+        return items
 
     def get_saved(self, scheme_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
@@ -192,4 +201,11 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
     missing = sorted(name for name in required_artifacts if not (path / name).is_file())
     if missing:
         raise FileNotFoundError('Saved experiment stage artifacts are missing: ' + ', '.join(missing))
+    artifact_hashes = manifest.get('artifact_sha256')
+    if not isinstance(artifact_hashes, dict):
+        raise ValueError('Saved artifact manifest lacks stage file digests; legacy artifact is not certified.')
+    for name in required_artifacts:
+        digest = artifact_hashes.get(name)
+        if not isinstance(digest, str) or hashlib.sha256((path / name).read_bytes()).hexdigest() != digest:
+            raise ValueError(f'Saved experiment stage artifact digest is invalid: {name}')
     return result
