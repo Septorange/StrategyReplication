@@ -89,3 +89,4 @@ dialog{width:min(850px,94vw);max-height:84vh;overflow:auto;border:1px solid #e1e
 @media(max-width:900px){.sensitivity-controls{grid-template-columns:1fr 1fr}.sensitivity-estimate,.sensitivity-controls .run-status{grid-column:1/-1}}
 @media(max-width:760px){.sensitivity-controls{grid-template-columns:1fr}}
 .export-status{display:inline-block;margin-left:7px;color:#71849b;font-size:9px}.export-status.error{color:#b4434e}
+.saved-list{display:grid;gap:8px;margin-top:12px}.saved-row{display:grid;grid-template-columns:minmax(130px,1fr) minmax(230px,1.5fr) minmax(250px,2fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid #e6ecf4;border-radius:9px;background:#fbfcff;color:#506681;font-size:11px}.saved-row small{overflow-wrap:anywhere;color:#8898ad}.compare-grid-wrap{overflow-x:auto}

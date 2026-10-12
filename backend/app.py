@@ -4,6 +4,9 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from contextvars import ContextVar
+from datetime import date
+import uuid
+import pandas as pd
 
 import hashlib
 import json
@@ -13,7 +16,9 @@ from .config import FRONTEND, DEMO_MODE, ROOT, SNAPSHOT
 from .experiment_runner import ExperimentRunner
 from .replay_service import ReplayService
 from .research_service import ResearchService
-from .schemas import ExperimentRequest
+from .schemas import ExperimentRequest, SaveExperimentRequest, EvaluateExperimentRequest, CompareExperimentsRequest
+from .experiment_library import ExperimentLibrary, resolve_artifact
+from .analytics_service import performance
 from .analytics_service import AnalyticsService
 from .analytics_schemas import (HistoryResponse, PerformanceResponse, WinRateResponse, ClassContributionResponse, AssetContributionResponse, ExposureResponse, DrawdownResponse)
 from .parameter_registry import parameter_capabilities
@@ -41,6 +46,7 @@ services_by_snapshot = {}
 runtime_errors = {}
 app = FastAPI(title='Strategy Lab Research Workstation', version='0.6.0')
 selected_snapshot = ContextVar('selected_snapshot', default=FORMAL_ID)
+experiment_library = ExperimentLibrary()
 
 
 class ContextService:
@@ -107,8 +113,6 @@ def load_snapshot_services(snapshot_id):
 @app.middleware('http')
 async def snapshot_scope(request: Request, call_next):
     snapshot_id=request.query_params.get('snapshot_id',FORMAL_ID)
-    if request.url.path.startswith('/api/experiment'):
-        snapshot_id=FORMAL_ID
     if snapshot_id!=FORMAL_ID and not get_snapshot(snapshot_id):
         return JSONResponse(status_code=404,content={'detail':{'code':'SNAPSHOT_NOT_REGISTERED','snapshot_id':snapshot_id}})
     token=selected_snapshot.set(snapshot_id)
@@ -403,7 +407,172 @@ def research_data_quality():
 
 @app.post('/api/experiment')
 def experiment(request: ExperimentRequest):
-    return require_service(experiments).run(request)
+    active_id=selected_snapshot.get()
+    active_loader=require_service(loader)
+    try:
+        result=require_service(experiments).run(request,snapshot_id=active_id,baseline=active_loader.summary)
+    except (OSError,ValueError,KeyError) as exc:
+        raise HTTPException(422,detail={'code':'EXPERIMENT_INPUT_UNAVAILABLE','message':str(exc)})
+    if result.get('status')!='PASS':
+        return result
+    identity_sha256=result.get('identity_sha256')
+    if not isinstance(identity_sha256,str) or len(identity_sha256)!=64:
+        raise HTTPException(500,detail={'code':'EXPERIMENT_IDENTITY_MISSING','message':'Real run lacks a full SHA-256 identity.'})
+    run_id=f'run_{identity_sha256}'
+    history=pd.DataFrame(result.get('history',{}).get('rows',[]))
+    if history.empty or not {'date','portfolio_return_net'}.issubset(history.columns):
+        raise HTTPException(500,detail={'code':'EXPERIMENT_HISTORY_MISSING','message':'Python experiment completed without daily return history.'})
+    history['date']=pd.to_datetime(history.date)
+    start,end=history.date.min().date().isoformat(),history.date.max().date().isoformat()
+    evaluation_digest=hashlib.sha256(f'{identity_sha256}:{start}:{end}'.encode()).hexdigest()
+    evaluation_id=f'eval_{evaluation_digest}'
+    evaluation={'from_date':start,'to_date':end,'available_from':start,'available_to':end,
+                'metrics':result['experiment'],'snapshot_id':active_id}
+    experiment_library.add_run(config_hash=result['config_hash'],snapshot_id=active_id,status='PASS',
+        config=result['config'],artifact_path=Path(result['artifact_path']),run_id=run_id)
+    experiment_library.add_evaluation(run_id=run_id,snapshot_id=active_id,from_date=start,to_date=end,
+        metrics=result['experiment'],evaluation_id=evaluation_id)
+    result.update(run_id=run_id,evaluation_id=evaluation_id,evaluation=evaluation)
+    return result
+
+
+def _run_artifact(run_id: str):
+    run=experiment_library.get_run(run_id)
+    if not run:
+        raise HTTPException(404,detail={'code':'EXPERIMENT_RUN_NOT_FOUND','run_id':run_id})
+    saved={**run,'artifact_path':run['artifact_path']}
+    try:
+        return run,resolve_artifact(experiment_library,saved)
+    except (OSError,ValueError,json.JSONDecodeError) as exc:
+        raise HTTPException(409,detail={'code':'EXPERIMENT_ARTIFACT_UNAVAILABLE','message':str(exc),'run_id':run_id})
+
+
+def _evaluate_result(result: dict, from_date: str, to_date: str):
+    frame=pd.DataFrame(result.get('history',{}).get('rows',[]))
+    if frame.empty:
+        raise HTTPException(409,detail={'code':'EXPERIMENT_HISTORY_MISSING'})
+    frame['date']=pd.to_datetime(frame.date).dt.strftime('%Y-%m-%d')
+    available=set(frame.date)
+    if from_date not in available or to_date not in available:
+        raise HTTPException(422,detail={'code':'EVALUATION_BOUNDARY_NOT_VERIFIED_TRADING_DATE',
+            'available_from':min(available),'latest_verified_date':max(available),
+            'from_date':from_date,'to_date':to_date})
+    if from_date>to_date or to_date>max(available):
+        raise HTTPException(422,detail={'code':'EVALUATION_OUTSIDE_VERIFIED_RANGE',
+            'available_from':min(available),'latest_verified_date':max(available)})
+    selected=frame[frame.date.between(from_date,to_date)].sort_values('date')
+    if selected.empty:
+        raise HTTPException(422,detail={'code':'EVALUATION_WINDOW_EMPTY','from_date':from_date,'to_date':to_date})
+    metrics=performance(selected.portfolio_return_net)
+    exposure=pd.DataFrame(result.get('exposure',{}).get('rows',[]))
+    if not exposure.empty:
+        exposure['date']=pd.to_datetime(exposure.date).dt.strftime('%Y-%m-%d')
+        exposure=exposure[exposure.date.isin(selected.date)]
+        for col in ('equity','bond','commodity'):
+            if col in exposure:
+                metrics['avg_'+col+'_exposure']=float(exposure[col].mean())
+    for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost'):
+        if col in selected:
+            metrics[col]=float(selected[col].fillna(0).sum())
+    return {'from_date':selected.date.min(),'to_date':selected.date.max(),'metrics':metrics,
+            'rows':selected.to_dict('records')}
+
+
+@app.post('/api/experiment/evaluations')
+def evaluate_experiment(request: EvaluateExperimentRequest):
+    run,result=_run_artifact(request.run_id)
+    try:
+        start=date.fromisoformat(request.evaluation_start).isoformat(); end=date.fromisoformat(request.evaluation_end).isoformat()
+    except ValueError:
+        raise HTTPException(422,detail={'code':'INVALID_EVALUATION_DATE'})
+    if start>end:
+        raise HTTPException(422,detail={'code':'INVALID_EVALUATION_RANGE'})
+    evaluation=_evaluate_result(result,start,end)
+    evaluation_id=f'eval_{uuid.uuid4().hex}'
+    experiment_library.add_evaluation(run_id=request.run_id,snapshot_id=run['snapshot_id'],
+        from_date=evaluation['from_date'],to_date=evaluation['to_date'],metrics=evaluation['metrics'],evaluation_id=evaluation_id)
+    return {'evaluation_id':evaluation_id,'run_id':request.run_id,'snapshot_id':run['snapshot_id'],
+            'latest_verified_date':max(str(x['date'])[:10] for x in result['history']['rows']),**evaluation}
+
+
+@app.post('/api/experiment/saved')
+def save_experiment(request: SaveExperimentRequest):
+    run=experiment_library.get_run(request.run_id)
+    if not run:
+        raise HTTPException(404,detail={'code':'EXPERIMENT_RUN_NOT_FOUND','run_id':request.run_id})
+    if not _run_artifact(request.run_id):
+        raise HTTPException(409,detail={'code':'EXPERIMENT_ARTIFACT_UNAVAILABLE'})
+    with experiment_library._connect() as db:
+        evaluation=db.execute('SELECT * FROM experiment_evaluations WHERE evaluation_id=? AND run_id=?',
+                              (request.evaluation_id,request.run_id)).fetchone()
+    if not evaluation:
+        raise HTTPException(404,detail={'code':'EXPERIMENT_EVALUATION_NOT_FOUND','evaluation_id':request.evaluation_id})
+    return experiment_library.save(run_id=request.run_id,evaluation_id=request.evaluation_id,
+                                   name=request.name,notes=request.notes)
+
+
+@app.get('/api/experiment/saved')
+def list_saved_experiments():
+    return {'saved':experiment_library.list_saved()}
+
+
+@app.get('/api/experiment/saved/{scheme_id}')
+def open_saved_experiment(scheme_id: str):
+    saved=experiment_library.get_saved(scheme_id)
+    if not saved:
+        raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND','scheme_id':scheme_id})
+    try:
+        result=resolve_artifact(experiment_library,saved)
+    except (OSError,ValueError,json.JSONDecodeError) as exc:
+        raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':str(exc)})
+    rows=result.get('history',{}).get('rows',[])
+    available_from=min((str(x['date'])[:10] for x in rows),default=saved['from_date'])
+    available_to=max((str(x['date'])[:10] for x in rows),default=saved['to_date'])
+    result.update(run_id=saved['run_id'],evaluation_id=saved['evaluation_id'],
+                  evaluation={'from_date':saved['from_date'],'to_date':saved['to_date'],
+                              'available_from':available_from,'available_to':available_to,
+                              'metrics':saved['metrics']})
+    return {'saved':{k:v for k,v in saved.items() if k!='artifact_path'},'result':result}
+
+
+@app.post('/api/experiment/compare')
+def compare_saved_experiments(request: CompareExperimentsRequest):
+    a,b=experiment_library.get_saved(request.scheme_a),experiment_library.get_saved(request.scheme_b)
+    if not a or not b:
+        raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND','scheme_ids':[request.scheme_a,request.scheme_b]})
+    try:
+        ra,rb=resolve_artifact(experiment_library,a),resolve_artifact(experiment_library,b)
+    except (OSError,ValueError,json.JSONDecodeError) as exc:
+        raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':str(exc)})
+    fa=pd.DataFrame(ra['history']['rows']); fb=pd.DataFrame(rb['history']['rows'])
+    for frame in (fa,fb): frame['date']=pd.to_datetime(frame.date).dt.strftime('%Y-%m-%d')
+    dates=sorted(set(fa.date).intersection(fb.date))
+    if not dates:
+        raise HTTPException(422,detail={'code':'NO_COMMON_OBSERVATIONS'})
+    start=request.evaluation_start or dates[0]
+    end=request.evaluation_end or dates[-1]
+    if start not in dates or end not in dates:
+        raise HTTPException(422,detail={'code':'COMPARISON_BOUNDARY_NOT_COMMON_VERIFIED_DATE',
+            'common_from':dates[0],'common_latest_verified_date':dates[-1],
+            'from_date':start,'to_date':end})
+    if start>end:
+        raise HTTPException(422,detail={'code':'NO_COMMON_INTERVAL','common_from':dates[0],'common_to':dates[-1]})
+    dates=[d for d in dates if start<=d<=end]
+    fa=fa[fa.date.isin(dates)].sort_values('date').reset_index(drop=True)
+    fb=fb[fb.date.isin(dates)].sort_values('date').reset_index(drop=True)
+    ma,mb=performance(fa.portfolio_return_net),performance(fb.portfolio_return_net)
+    for metrics,frame in ((ma,fa),(mb,fb)):
+        for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost'):
+            if col in frame: metrics[col]=float(frame[col].fillna(0).sum())
+    paired=[]
+    for left,right in zip(fa.to_dict('records'),fb.to_dict('records')):
+        paired.append({'date':left['date'],'scheme_a_nav':float((1+fa.portfolio_return_net).cumprod().iloc[len(paired)]),
+                       'scheme_b_nav':float((1+fb.portfolio_return_net).cumprod().iloc[len(paired)]),
+                       'scheme_a_return':float(left['portfolio_return_net']),'scheme_b_return':float(right['portfolio_return_net'])})
+    return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
+            'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
+            'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
+            'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
 
 
 

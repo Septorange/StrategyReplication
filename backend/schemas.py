@@ -13,3 +13,23 @@ class ExperimentRequest(BaseModel):
     short_vol_windows: list[int]|None=None
     asset_long_vol_window: int|None=None
     quantile_lookback: int|None=None
+
+class SaveExperimentRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    run_id: str
+    evaluation_id: str
+    name: str=Field(min_length=1,max_length=100)
+    notes: str=Field(default='',max_length=2000)
+
+class EvaluateExperimentRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    run_id: str
+    evaluation_start: str
+    evaluation_end: str
+
+class CompareExperimentsRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    scheme_a: str
+    scheme_b: str
+    evaluation_start: str|None=None
+    evaluation_end: str|None=None

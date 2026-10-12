@@ -12,6 +12,8 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+experiment_library.sqlite3*
+experiment_cache/*
 
 # Local V0.7 snapshots contain derived iFinD history and must not enter the public repo.
 data/v07_local/

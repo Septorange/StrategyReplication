@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "tolerance": 1e-10,
+  "experiment": "target_vol=10%, commodity_cost_bps=0; all other controls at V6 defaults",
+  "identity_sha256": "3306f126fc096802f43a667c49fa2815a70d35103c497bf781bd0a5715c89327",
+  "published_snapshot_id": "v07_extended_10119bd207b16499",
+  "portfolio_dates": [
+    "2015-09-30",
+    "2026-09-24"
+  ],
+  "portfolio_rows": 2670,
+  "daily_asset_state_rows": 29370,
+  "metrics": {
+    "portfolio_return_net_max_abs_diff": 0.0,
+    "portfolio_return_gross_max_abs_diff": 0.0,
+    "portfolio_return_after_contract_roll_max_abs_diff": 0.0,
+    "contract_roll_cost_max_abs_diff": 0.0,
+    "portfolio_rebalance_cost_max_abs_diff": 0.0,
+    "total_cost_max_abs_diff": 0.0,
+    "final_10vt_multiplier_max_abs_diff": 0.0,
+    "nav_net_max_abs_diff": 1.5987211554602254e-14,
+    "weight_start_of_day_max_abs_diff": 0.0,
+    "final_weight_max_abs_diff": 0.0,
+    "weight_end_of_day_max_abs_diff": 0.0,
+    "midmonth_trigger_mismatch_count": 0,
+    "single_asset_haircut_max_abs_diff": 0.0
+  }
+}
