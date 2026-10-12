@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .utils import records
+from .snapshot_registry import get_snapshot, FORMAL_ID
 
 RISK_ASSETS = ['IF', 'IC', 'IM', 'SC', 'FG', 'I', 'M', 'AU', 'CU']
 FIXED_ASSETS = ['TF', 'T']
@@ -69,10 +70,16 @@ class ResearchService:
         return {'versions': [v.__dict__ for v in VERSIONS], 'default': 'V6'}
 
     def lineage(self):
-        return {'version': 'V6', 'status': 'AUDITED', 'fields': [
-            {'field': f, 'snapshot': s, 'source_file': sf, 'source_column': sc, 'mapping': typ, 'meaning': meaning, 'audit_status': 'PASS'}
-            for f, s, sf, sc, typ, meaning in LINEAGE
-        ]}
+        extended=self.l.snapshot_id!=FORMAL_ID
+        entry=get_snapshot(self.l.snapshot_id) if extended else None
+        audit_status=(entry or {}).get('audit_status','WEB_LAYER_PENDING_INDEPENDENT_REVIEW')
+        mappings=[]
+        for f,s,sf,sc,typ,meaning in LINEAGE:
+            if extended:
+                sf=sf.replace('phase3_formal/daily_weights.csv','phase3b/final_daily_weights.parquet + phase3a/target_weights.parquet').replace('phase3_formal/daily_asset_contribution.csv','phase3b/final_daily_weights.parquet + phase2/trade_returns.parquet')
+            mappings.append({'field':f,'snapshot':s,'source_file':sf,'source_column':sc,'mapping':typ,'meaning':meaning,'audit_status':audit_status if extended else 'PASS'})
+        return {'version':'V6','snapshot_id':self.l.snapshot_id,'status':audit_status if extended else 'AUDITED','fields':mappings
+        }
 
     def data_quality(self):
         rolls = self.l.rolls

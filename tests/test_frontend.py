@@ -5,17 +5,22 @@ js=(ROOT/'frontend/app.js').read_text()
 css=(ROOT/'frontend/styles.css').read_text()
 
 def test_research_workstation_navigation_and_demo_off():
-    for x in ['策略全景','决策解释','事件研究','收益归因','执行与换月','参数实验','版本比较','数据与审计']:
+    for x in ['策略全景','决策解释','事件研究','收益归因','执行与换月','实验方案','策略版本','数据与审计']:
         assert x in js
     assert 'window.DEMO_MODE=false' in html
     assert 'Research Analytics' in html
     for x in ['表现与胜率','年度收益归因','持仓与风险','回撤研究','risk_budget_vol_window','short_vol_windows','momentum_excluded_count',"analytics('history'",'/api/experiment/parameters','data-export-png','sensitivityParam']:
         assert x in html+js
-    assert 'V0.6 ANALYTICS · 待独立审计' in html
+    assert 'Strategy Lab · V0.7 Research Analytics' in html
+    assert '默认策略（内部审计：V6）' in html
+    assert '数据快照' in html
     assert 'const modeAPageIds=' in js and 'const modeBPageIds=' in js
     assert 'const modeBPageIds=[5]' in js
     assert 'visible.map((pageId,index)' in js
     assert 'String(index+1).padStart(2' in js
+    assert "const analyticsMeta=x=>x?" in js
+    assert '快照已切换，忽略过期请求' in js
+    assert 'snapshot_id:state.snapshotId,snapshot_scope:snapshotScopeLabel()' in js
 
 def test_research_context_is_global_and_experiment_uses_api():
     for x in ['strategyVersion','selectedDate','fromDate','toDate','selectedAsset','selectedEventId']:

@@ -4,8 +4,8 @@ const PAGES = [
   ['事件研究','自动定位值得研究的回撤、风控、执行与换月事件'],
   ['收益归因','从大类到资产拆解一段区间的收益、成本与回撤来源'],
   ['执行与换月','查看真实合约生命周期、换月触发与收益时点'],
-  ['参数实验','调用真实 V6 Python 引擎并比较反事实结果'],
-  ['版本比较','为 V5 / V6 / V7 / V8 的统一研究框架预留接口'],
+  ['实验方案','调用原正式回测引擎比较参数情景'],
+  ['策略版本','默认策略的版本登记与审计状态'],
   ['数据与审计','查看字段血缘、数据质量、规则状态与审计边界'],
   ['表现与胜率','年度表现指标与八个滚动持有期胜率'],
   ['年度收益归因','大类收益贡献与单资产年度贡献矩阵'],
@@ -20,7 +20,7 @@ const ResearchContext = {
 window.ResearchContext = ResearchContext;
 
 const state = {
-  mode:"A", page:0, summary:null, rules:null, series:[], exposures:[], assets:[], versions:[], lineage:[], dataQuality:null,
+  mode:"A", page:0, snapshotId:'V6_FORMAL', snapshotOptions:[], summary:null, rules:null, series:[], exposures:[], assets:[], versions:[], lineage:[], dataQuality:null,
   drawdowns:[], selectedEvent:null, eventRows:[], eventFilters:{group:'', asset:''}, experimentResult:null,
   activeDecisionStep:0, analytics:{}, overviewCache:{}, parameterRegistry:null, analyticsDisplay:{assetClass:'all',volWindow:120,showGross:false,showVol:true,winRateHorizon:'all'}, experimentHistory:[], sensitivity:{running:false,cancelRequested:false,results:[],inFlight:false}, csvExports:{}
 };
@@ -28,12 +28,23 @@ const state = {
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const snapshotOption=()=>state.snapshotOptions.find(x=>x.snapshot_id===state.snapshotId)||{};
+const snapshotReviewLabel=()=>snapshotOption().audit_status==='WEB_LAYER_AUDITED'?'网页映射与分析层已通过独立审计':'网页映射与分析层待独立审计';
+const snapshotScopeLabel=()=>state.snapshotId==='V6_FORMAL'?'正式基准 · 截至 2024-11-20（内部审计：V6）':`扩展数据快照 · 截至 ${snapshotOption().data_end_date||state.summary?.end_date||'未知'}（${snapshotReviewLabel()}）`;
+const strategyLabel='默认策略（内部审计：V6）';
+let snapshotEpoch=0;
 const api = async (url, options) => {
+  const fixedFormal=url.startsWith('/api/experiment');
+  const metadata=url==='/api/data/snapshots'||url.startsWith('/api/data/snapshots/');
+  const scopedSnapshotId=!fixedFormal&&!metadata?state.snapshotId:null;
+  const requestEpoch=snapshotEpoch;
+  if(scopedSnapshotId){const [path,query='']=url.split('?');const params=new URLSearchParams(query);params.set('snapshot_id',scopedSnapshotId);url=`${path}?${params}`;}
   let r;
   try { r=await fetch(url,options); }
   catch(e){ throw new Error(`${options?.method||'GET'} ${url} · 网络错误：${e?.message||'连接失败'}`); }
+  if(scopedSnapshotId&&(scopedSnapshotId!==state.snapshotId||requestEpoch!==snapshotEpoch)){const stale=new Error('快照已切换，忽略过期请求');stale.name='AbortError';throw stale;}
   if(!r.ok){let detail='';try{detail=await r.text();}catch{}throw new Error(`${options?.method||'GET'} ${url} · HTTP ${r.status}${detail?`：${detail.slice(0,240)}`:''}`);}
-  try{return await r.json();}catch(e){throw new Error(`${options?.method||'GET'} ${url} · 响应格式错误：${e?.message||'无效 JSON'}`);}
+  try{const payload=await r.json();if(scopedSnapshotId&&(scopedSnapshotId!==state.snapshotId||requestEpoch!==snapshotEpoch)){const stale=new Error('快照已切换，忽略过期请求');stale.name='AbortError';throw stale;}return payload;}catch(e){if(e?.name==='AbortError')throw e;throw new Error(`${options?.method||'GET'} ${url} · 响应格式错误：${e?.message||'无效 JSON'}`);}
 };
 const finite = x => x!==null && x!==undefined && x!=='' && Number.isFinite(Number(x));
 const num = (x,n=3) => finite(x) ? Number(x).toFixed(n) : '—';
@@ -120,11 +131,12 @@ function multiLineSvg(rows,keys,{height=250,markerDate=null}={}){
 
 const ANALYTICS_BASE='/api/strategy/V6/analytics';
 const analyticsRows=x=>Array.isArray(x?.rows)?x.rows:[];
-const analyticsMeta=x=>x?`${esc(x.method_id||'')} · ${esc(x.data_status||'REAL_V6_DERIVED')}${x.source_manifest_hash?` · manifest ${esc(String(x.source_manifest_hash).slice(0,12))}`:''}`:'';
+const analyticsMeta=x=>x?`${esc(x.method_id||'')} · ${esc(x.data_status||'REAL_V6_DERIVED')} · ${esc(x.analytics_audit_status||snapshotScopeLabel())}${x.source_manifest_hash?` · manifest ${esc(String(x.source_manifest_hash).slice(0,12))}`:''}`:'';
 async function analytics(endpoint,params={}){
   const q=new URLSearchParams(params);const url=`${ANALYTICS_BASE}/${endpoint}${q.size?'?'+q:''}`;
-  if(state.analytics[url])return state.analytics[url];
-  const data=await api(url);state.analytics[url]=data;return data;
+  const key=`${state.snapshotId}|${url}`;
+  if(state.analytics[key])return state.analytics[key];
+  const data=await api(url);state.analytics[key]=data;return data;
 }
 function invalidateAnalytics(){state.analytics={};}
 function inRange(rows,dateKey='date'){
@@ -132,7 +144,7 @@ function inRange(rows,dateKey='date'){
 }
 function researchControls(){return `<div class="analytics-controls"><label>类别过滤<select id="analyticsClass"><option value="all">全部大类</option><option value="equity">Equity</option><option value="bond">Bond</option><option value="commodity">Commodity</option></select></label><label>展示波动窗口<select id="analyticsVolWindow">${[20,60,120,240].map(v=>`<option value="${v}" ${v===state.analyticsDisplay.volWindow?'selected':''}>${v}D · 仅展示</option>`).join('')}</select></label><label class="check-label"><input id="analyticsShowGross" type="checkbox" ${state.analyticsDisplay.showGross?'checked':''}> 显示毛净值</label><label class="check-label"><input id="analyticsShowVol" type="checkbox" ${state.analyticsDisplay.showVol?'checked':''}> 显示展示波动率</label><label>胜率持有期<select id="winRateHorizon"><option value="all">全部期限</option>${[[1,'日度'],[5,'周度'],[21,'月度'],[63,'季度'],[126,'半年度'],[252,'年度'],[378,'18个月'],[504,'两年度']].map(([n,l])=>`<option value="${n}" ${String(n)===String(state.analyticsDisplay.winRateHorizon)?'selected':''}>${l} · ${n}D</option>`).join('')}</select></label></div>`;}
 function bindResearchControls(){const c=$('#analyticsClass'),w=$('#analyticsVolWindow'),g=$('#analyticsShowGross'),v=$('#analyticsShowVol'),h=$('#winRateHorizon');if(c){c.value=ResearchContext.selectedAssetClass||'all';c.onchange=()=>{ResearchContext.selectedAssetClass=c.value==='all'?null:c.value;state.analyticsDisplay.assetClass=c.value;render();};}if(w)w.onchange=()=>{state.analyticsDisplay.volWindow=Number(w.value);invalidateAnalytics();render();};if(g)g.onchange=()=>{state.analyticsDisplay.showGross=g.checked;render();};if(v)v.onchange=()=>{state.analyticsDisplay.showVol=v.checked;render();};if(h)h.onchange=()=>{state.analyticsDisplay.winRateHorizon=h.value;render();};}
-function lineChart(rows,series,{height=320,selectedDate=ResearchContext.selectedDate,range=null,dual=false,source='V6 analytics API'}={}){
+function lineChart(rows,series,{height=320,selectedDate=ResearchContext.selectedDate,range=null,dual=false,source='默认策略分析接口'}={}){
   const valid=rows.filter(r=>series.some(s=>finite(r[s.key])));if(valid.length<2)return `<div class="empty-state">样本不足，无法绘图</div>`;
   const W=960,H=height,L=64,R=dual?66:24,T=22,B=38,innerW=W-L-R,innerH=H-T-B;
   const scales=[0,1].map(axis=>{const group=series.filter(s=>(s.axis||0)===axis);const vals=valid.flatMap(r=>group.map(s=>Number(r[s.key]))).filter(Number.isFinite);let lo=Math.min(...vals),hi=Math.max(...vals);if(!Number.isFinite(lo)||!Number.isFinite(hi)){lo=0;hi=1;}if(lo===hi){lo-=.01;hi+=.01;}const pad=(hi-lo)*.06;return {lo:lo-pad,hi:hi+pad};});
@@ -146,15 +158,15 @@ function lineChart(rows,series,{height=320,selectedDate=ResearchContext.selected
 function bindAnalyticsCharts(){
   $$('.chart-box').forEach(box=>{const svg=box.querySelector('svg'),overlay=svg?.querySelector('[data-hover-chart]'),tip=box.querySelector('.chart-tooltip'),raw=box.querySelector('[data-chart-rows]'),rawSeries=box.querySelector('[data-chart-series]');if(!overlay||!raw)return;let rows=[],chartSeries=[];try{rows=JSON.parse(raw.textContent);chartSeries=JSON.parse(rawSeries?.textContent||'[]');}catch{};
     const position=e=>{const rect=svg.getBoundingClientRect(),viewX=(e.clientX-rect.left)/rect.width*960;return Math.max(0,Math.min(1,(viewX-64)/(960-64-(chartSeries.some(s=>s.axis===1)?66:24))));};
-    const move=e=>{const fx=position(e),i=Math.round(fx*(rows.length-1)),r=rows[i];if(!r)return;const keys=overlay.dataset.hoverChart.split(',');tip.innerHTML=`<strong>${esc(dateOnly(r.date))}</strong>${keys.map(k=>{const s=chartSeries.find(x=>x.key===k);const val=r[k];return `<span><i style="background:${s?.color||'#476de0'}"></i>${esc(s?.label||k)}：${finite(val)?(s?.format==='pct'?pct(val):num(val,4)):'—'}</span>`}).join('')}<small>${esc(box.dataset.source||'V6 analytics API')}</small>`;tip.style.display='block';tip.style.left=`${Math.min(74,Math.max(2,fx*100))}%`;};
+    const move=e=>{const fx=position(e),i=Math.round(fx*(rows.length-1)),r=rows[i];if(!r)return;const keys=overlay.dataset.hoverChart.split(',');tip.innerHTML=`<strong>${esc(dateOnly(r.date))}</strong>${keys.map(k=>{const s=chartSeries.find(x=>x.key===k);const val=r[k];return `<span><i style="background:${s?.color||'#476de0'}"></i>${esc(s?.label||k)}：${finite(val)?(s?.format==='pct'?pct(val):num(val,4)):'—'}</span>`}).join('')}<small>${esc(box.dataset.source||'默认策略分析接口')}</small>`;tip.style.display='block';tip.style.left=`${Math.min(74,Math.max(2,fx*100))}%`;};
     overlay.addEventListener('pointermove',move);overlay.addEventListener('pointerleave',()=>tip.style.display='none');overlay.addEventListener('click',e=>{move(e);const r=rows[Math.round(position(e)*(rows.length-1))];if(r?.date){ResearchContext.selectedDate=dateOnly(r.date);syncContextControls();}});
   });
 }
-function downloadCsv(filename,rows,columns,method='V6 analytics'){
-  const meta=[['strategy_version','V6'],['research_from',ResearchContext.fromDate||''],['research_to',ResearchContext.toDate||''],['method',method]];
+function downloadCsv(filename,rows,columns,method='默认策略分析'){
+  const meta=[['strategy_version',strategyLabel],['snapshot_id',state.snapshotId],['snapshot_scope',snapshotScopeLabel()],['research_from',ResearchContext.fromDate||''],['research_to',ResearchContext.toDate||''],['method',method]];
   const values=rows.map(r=>columns.map(c=>c.csv?c.csv(r[c.key],r):(r[c.key]??'')));
   const csv=[...meta,...[columns.map(c=>c.label||c.key)],...values].map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\r\n');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download=`${filename}_V6_${ResearchContext.fromDate||'all'}_${ResearchContext.toDate||'all'}.csv`;a.click();URL.revokeObjectURL(a.href);
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download=`${filename}_${state.snapshotId}_${ResearchContext.fromDate||'all'}_${ResearchContext.toDate||'all'}.csv`;a.click();URL.revokeObjectURL(a.href);
 }
 async function downloadPng(button){
   const panelEl=button.closest('.panel'),box=panelEl?.querySelector('svg.analytics-chart,svg[role="img"]');if(!box){showExportMessage(button,'图表不可用，无法导出 PNG。',true);return;}
@@ -166,28 +178,28 @@ async function downloadPng(button){
     svg.setAttribute('viewBox',`${vx} ${vy} ${vw} ${vh+footerHeight}`);svg.setAttribute('width',String(width));svg.setAttribute('height',String(height));svg.setAttribute('xmlns','http://www.w3.org/2000/svg');
     const ns='http://www.w3.org/2000/svg',bg=document.createElementNS(ns,'rect');bg.setAttribute('x','0');bg.setAttribute('y','0');bg.setAttribute('width',String(vw));bg.setAttribute('height',String(vh));bg.setAttribute('fill','#ffffff');svg.insertBefore(bg,svg.firstChild);
     const style=document.createElementNS(ns,'style');style.textContent='.chart-grid{stroke:#e9edf4;stroke-width:1;stroke-dasharray:4 4}.chart-axis{fill:#71839a;font:10px sans-serif}.chart-axis-title{fill:#465c78;font:700 10px sans-serif}.annual-class-year.selected rect{stroke:#273f74;stroke-width:2}';svg.insertBefore(style,svg.firstChild);
-    const title=panelEl?.querySelector('.panel-title,h3')?.textContent?.trim()||box.getAttribute('aria-label')||'V6 analytics',legend=panelEl?.querySelector('.legend')?.innerText?.replace(/\s+/g,' · ').trim()||box.getAttribute('aria-label')||'图表指标',scope=panelEl?.querySelector('.panel-head .desc')?.textContent?.trim()||'',source=panelEl?.querySelector('.chart-source')?.textContent?.trim()||'V6 analytics API',method=panelEl?.querySelector('.analytics-head small')?.textContent?.trim()||source,short=value=>String(value).replace(/\s+/g,' ').trim().slice(0,145);
+    const title=panelEl?.querySelector('.panel-title,h3')?.textContent?.trim()||box.getAttribute('aria-label')||'默认策略分析',legend=panelEl?.querySelector('.legend')?.innerText?.replace(/\s+/g,' · ').trim()||box.getAttribute('aria-label')||'图表指标',scope=panelEl?.querySelector('.panel-head .desc')?.textContent?.trim()||'',source=panelEl?.querySelector('.chart-source')?.textContent?.trim()||'默认策略分析接口',method=panelEl?.querySelector('.analytics-head small')?.textContent?.trim()||source,short=value=>String(value).replace(/\s+/g,' ').trim().slice(0,145);
     const footerY=vh+18,footerBg=document.createElementNS(ns,'rect');footerBg.setAttribute('x','0');footerBg.setAttribute('y',String(vh));footerBg.setAttribute('width',String(vw));footerBg.setAttribute('height',String(footerHeight));footerBg.setAttribute('fill','#f7f9fc');svg.appendChild(footerBg);
     const addFooterLine=(y,text,size=12,color='#536983',weight='400')=>{const node=document.createElementNS(ns,'text');node.setAttribute('x','20');node.setAttribute('y',String(y));node.setAttribute('fill',color);node.setAttribute('font-family','Arial,sans-serif');node.setAttribute('font-size',String(size));node.setAttribute('font-weight',weight);node.textContent=text;svg.appendChild(node);};
-    addFooterLine(footerY,title,15,'#304867','700');addFooterLine(footerY+20,`V6 正式策略基线 · V0.6 新增分析（独立审计待完成） · ${ResearchContext.fromDate||'全期'} 至 ${ResearchContext.toDate||'全期'}`,11,'#566c88','600');
+    addFooterLine(footerY,title,15,'#304867','700');addFooterLine(footerY+20,`${strategyLabel} · ${snapshotScopeLabel()} · ${ResearchContext.fromDate||'全期'} 至 ${ResearchContext.toDate||'全期'}`,11,'#566c88','600');
     addFooterLine(footerY+40,`指标：${short(legend)}`,11);addFooterLine(footerY+60,`统计口径：${short(scope||'见图表说明')}`,10,'#71839a');addFooterLine(footerY+80,`方法/来源：${short(`${method} · ${source}`)}`,9,'#8997a8');
     svgUrl=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)],{type:'image/svg+xml;charset=utf-8'}));
     const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('浏览器无法渲染此 SVG 图表'));img.src=svgUrl;});
     const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const ctx=canvas.getContext('2d');if(!ctx)throw new Error('当前浏览器无法创建 PNG 画布');ctx.drawImage(img,0,0,width,height);
     const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!png)throw new Error('浏览器未能生成 PNG 文件');
-    const fileUrl=URL.createObjectURL(png),a=document.createElement('a');a.href=fileUrl;a.download=`V6_${ResearchContext.fromDate||'all'}_${ResearchContext.toDate||'all'}_analytics.png`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(fileUrl),1500);showExportMessage(button,'PNG 已生成并开始下载。');
+    const fileUrl=URL.createObjectURL(png),a=document.createElement('a');a.href=fileUrl;a.download=`${state.snapshotId}_${ResearchContext.fromDate||'all'}_${ResearchContext.toDate||'all'}_analytics.png`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(fileUrl),1500);showExportMessage(button,'PNG 已生成并开始下载。');
   }catch(error){showExportMessage(button,`PNG 导出失败：${error.message}`,true);}finally{if(svgUrl)URL.revokeObjectURL(svgUrl);button.disabled=false;button.textContent=original;}
 }
 function showExportMessage(button,message,isError=false){let node=button.parentElement?.querySelector('.export-status');if(!node){node=document.createElement('small');node.className='export-status';node.setAttribute('role','status');button.insertAdjacentElement('afterend',node);}node.textContent=message;node.classList.toggle('error',Boolean(isError));}
 function exportActions(){return `<button class="icon-button" type="button" data-export-png>导出 PNG</button>`;}
-function bindAnalyticsActions(){bindAnalyticsCharts();$$('[data-export-png]').forEach(b=>b.onclick=()=>downloadPng(b));$$('[data-export-csv]').forEach(b=>b.onclick=()=>{const id=b.dataset.exportCsv,tableEl=$(`[data-csv-table="${id}"]`),record=state.csvExports[id];if(!tableEl||!record)return;downloadCsv(id,record.rows,record.columns,b.dataset.method||'V6 derived analytics');});bindResearchControls();$$('[data-legend-class]').forEach(b=>b.onclick=()=>{const cl=b.dataset.legendClass;ResearchContext.selectedAssetClass=ResearchContext.selectedAssetClass===cl?null:cl;state.analyticsDisplay.assetClass=ResearchContext.selectedAssetClass||'all';render();});}
+function bindAnalyticsActions(){bindAnalyticsCharts();$$('[data-export-png]').forEach(b=>b.onclick=()=>downloadPng(b));$$('[data-export-csv]').forEach(b=>b.onclick=()=>{const id=b.dataset.exportCsv,tableEl=$(`[data-csv-table="${id}"]`),record=state.csvExports[id];if(!tableEl||!record)return;downloadCsv(id,record.rows,record.columns,b.dataset.method||'默认策略分析');});bindResearchControls();$$('[data-legend-class]').forEach(b=>b.onclick=()=>{const cl=b.dataset.legendClass;ResearchContext.selectedAssetClass=ResearchContext.selectedAssetClass===cl?null:cl;state.analyticsDisplay.assetClass=ResearchContext.selectedAssetClass||'all';render();});}
 function analyticsTable(rows,columns,{id='analytics',rowClass=null}={}){
   if(!rows.length)return `<div class="empty-state">当前区间没有数据</div>`;
   const body=rows.map((r,i)=>`<tr ${rowClass?`class="${rowClass(r)}"`:''} data-table-row="${i}">${columns.map(c=>`<td>${c.render?c.render(r[c.key],r):esc(r[c.key]??'—')}</td>`).join('')}</tr>`).join('');
   state.csvExports[id]={rows,columns};
   return `<div class="table-wrap analytics-table" data-csv-table="${esc(id)}"><table><thead><tr>${columns.map(c=>`<th>${esc(c.label||c.key)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
-function analyticsHeader(name,data,rows,cols){return `<div class="analytics-head"><div>${badge('REAL V6 DERIVED','success')} ${badge('V0.6 NEW · AUDIT PENDING','warn')}<small>${analyticsMeta(data)}</small></div><button type="button" class="icon-button" data-export-csv="${esc(name)}" data-method="${esc(data?.method_id||'V6 derived analytics')}">下载 CSV</button></div>`;}
+function analyticsHeader(name,data,rows,cols){const sourceStatus=state.snapshotId==='V6_FORMAL'?'正式基准':'扩展数据快照',reviewStatus=state.snapshotId==='V6_FORMAL'?'分析层待独立审计':snapshotReviewLabel();return `<div class="analytics-head"><div>${badge(`${sourceStatus} · 内部审计 V6`,'success')} ${badge(reviewStatus,state.snapshotId!=='V6_FORMAL'&&snapshotOption().audit_status==='WEB_LAYER_AUDITED'?'success':'warn')}<small>${analyticsMeta(data)}</small></div><button type="button" class="icon-button" data-export-csv="${esc(name)}" data-method="${esc(data?.method_id||'默认策略分析')}">下载 CSV</button></div>`;}
 function chartPanel(title,chart,desc,rows,columns,id){return panel(title,`${chart}<div class="panel-actions"><button type="button" class="icon-button" data-export-png>导出 PNG</button></div>`,desc);}
 function drawdownChart(rows,episodes){
   const valid=rows.filter(r=>finite(r.nav_net));if(valid.length<2)return '<div class="empty-state">样本不足，无法绘图</div>';
@@ -197,7 +209,7 @@ function drawdownChart(rows,episodes){
   const shades=episodes.map((ep,i)=>{const a=idx(ep.peak_date),b=idx(ep.trough_date);if(a<0||b<0||b<a)return '';return `<rect class="dd-episode-overlay ${ep.episode_id===ResearchContext.drawdownEventId?'active':''}" data-dd-episode="${esc(ep.episode_id)}" x="${x(a)}" y="${T}" width="${Math.max(2,x(b)-x(a))}" height="${ih}" fill="${['#d5828b','#e0a86d','#8098d4','#75b7a6','#9c8dc4'][i]}" fill-opacity=".16"><title>${esc(dateOnly(ep.peak_date))} → ${esc(dateOnly(ep.trough_date))} · ${pct(ep.max_drawdown)}</title></rect>`;}).join('');
   const path=valid.map((r,i)=>`${i?'L':'M'}${x(i).toFixed(2)},${y(Number(r.nav_net)).toFixed(2)}`).join(' '),ticks=[0,.25,.5,.75,1].map(t=>{const v=max-t*(max-min),yy=T+t*ih;return `<line class="chart-grid" x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}"/><text class="chart-axis" x="${L-8}" y="${yy+4}" text-anchor="end">${v.toFixed(2)}</text>`}).join('');
   const troughs=episodes.map(ep=>{const i=idx(ep.trough_date);if(i<0)return '';return `<circle cx="${x(i)}" cy="${y(Number(valid[i].nav_net))}" r="4" fill="#c96c78" stroke="white" stroke-width="2"><title>${dateOnly(ep.trough_date)} ${pct(ep.max_drawdown)}</title></circle><text class="chart-axis" x="${x(i)+5}" y="${y(Number(valid[i].nav_net))-7}">${pct(ep.max_drawdown)}</text>`}).join('');
-  return `<div class="chart-box drawdown-chart"><svg class="analytics-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="V6 净值曲线与 Top 5 回撤区间"><text class="chart-axis-title" x="${L}" y="14">净值（基准=1）</text>${ticks}${shades}<path d="${path}" fill="none" stroke="#476de0" stroke-width="2.5"/>${troughs}<text class="chart-axis" x="${L}" y="${H-8}">${dateOnly(valid[0].date)}</text><text class="chart-axis" text-anchor="end" x="${W-R}" y="${H-8}">${dateOnly(valid.at(-1).date)}</text></svg><div class="legend"><span style="--legend-color:#476de0">V6 Net NAV</span><span style="--legend-color:#d5828b">Top 5 Peak → Trough 风险累积区间</span></div><small class="chart-source">点击阴影跳转区间归因；来源：V6 analytics API</small><script type="application/json" data-chart-rows>${JSON.stringify(valid).replace(/</g,'\\u003c')}</script></div>`;
+  return `<div class="chart-box drawdown-chart"><svg class="analytics-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="默认策略净值曲线与 Top 5 回撤区间"><text class="chart-axis-title" x="${L}" y="14">净值（基准=1）</text>${ticks}${shades}<path d="${path}" fill="none" stroke="#476de0" stroke-width="2.5"/>${troughs}<text class="chart-axis" x="${L}" y="${H-8}">${dateOnly(valid[0].date)}</text><text class="chart-axis" text-anchor="end" x="${W-R}" y="${H-8}">${dateOnly(valid.at(-1).date)}</text></svg><div class="legend"><span style="--legend-color:#476de0">默认策略净值</span><span style="--legend-color:#d5828b">Top 5 Peak → Trough 风险累积区间</span></div><small class="chart-source">点击阴影跳转区间归因；来源：默认策略分析接口</small><script type="application/json" data-chart-rows>${JSON.stringify(valid).replace(/</g,'\\u003c')}</script></div>`;
 }
 async function renderPerformance(){
   const [p,w]=await Promise.all([analytics('performance-by-year'),analytics('win-rates',{overlap:'true'})]);
@@ -206,7 +218,7 @@ async function renderPerformance(){
   const pc=[{key:'period',label:'指标 / 区间',render:(v,r)=>esc(r.year==null||String(r.period).toUpperCase()==='FULL'?'自回测基日（年化）':(r.partial_year?`${r.year}*`:r.year))},{key:'return',label:'年化 / 年度复合收益（%）',render:(v,r)=>pct(r.year==null||String(r.period).toUpperCase()==='FULL'?r.annualized_return:r.return),csv:(v,r)=>{const x=r.year==null||String(r.period).toUpperCase()==='FULL'?r.annualized_return:r.return;return finite(x)?Number(x)*100:'';}},{key:'annualized_vol',label:'年化波动率（%）',render:v=>pct(v),csv:v=>finite(v)?Number(v)*100:''},{key:'sharpe',label:'Sharpe',render:v=>num(v,3)},{key:'max_drawdown',label:'最大回撤（%）',render:v=>pct(v),csv:v=>finite(v)?Number(v)*100:''}];
   const wc=[{key:'label',label:'持有期'},{key:'horizon',label:'交易日',render:v=>num(v,0)},{key:'up',label:'上涨次数'},{key:'down',label:'下跌次数'},{key:'zero',label:'零收益次数'},{key:'windows',label:'有效窗口数'},{key:'win_rate',label:'胜率（%）',render:v=>pct(v),csv:v=>finite(v)?Number(v)*100:''},{key:'up_avg',label:'上涨平均收益（%）',render:v=>signedPct(v),csv:v=>finite(v)?Number(v)*100:''},{key:'down_avg',label:'下跌平均收益（%）',render:v=>signedPct(v),csv:v=>finite(v)?Number(v)*100:''}];
   const perfFiltered=perf;
-  $('#content').innerHTML=`${researchControls()}${panel('策略历史表现表',`${analyticsHeader('performance_by_year',p,perf,pc)}${analyticsTable(perfFiltered,pc,{id:'performance_by_year',rowClass:r=>r.year!=null&&Number(r.year)===Number(ResearchContext.selectedYear)?'selected-row':''})}<div class="method-note">${partialNote?`* 部分年度：${esc(partialNote)}。`:''}全期采用 V6 正式年化指标；年度收益为自然年复合区间收益，最大回撤保留负号。${esc(meta)}</div>`,'全期展示正式年化收益；自然年展示复合收益')}${panel('滚动持有期胜率',`${analyticsHeader('rolling_win_rates',w,wins,wc)}${analyticsTable(wins,wc,{id:'rolling_win_rates'})}<div class="callout warning">胜率使用重叠交易日窗口，样本彼此相关，不代表独立预测准确率。收益等于零的窗口不计入涨跌分母；无样本显示 —。</div>`,'窗口口径：1 / 5 / 21 / 63 / 126 / 252 / 378 / 504 个交易日')}`;
+  $('#content').innerHTML=`${researchControls()}${panel('策略历史表现表',`${analyticsHeader('performance_by_year',p,perf,pc)}${analyticsTable(perfFiltered,pc,{id:'performance_by_year',rowClass:r=>r.year!=null&&Number(r.year)===Number(ResearchContext.selectedYear)?'selected-row':''})}<div class="method-note">${partialNote?`* 部分年度：${esc(partialNote)}。`:''}${state.snapshotId==='V6_FORMAL'?'全期指标来自已审计正式基准。':'全期指标来自当前扩展数据快照，尚待独立审计。'}年度收益为自然年复合区间收益，最大回撤保留负号。${esc(meta)}</div>`,`${snapshotScopeLabel()}；年度行展示自然年复合收益`)}${panel('滚动持有期胜率',`${analyticsHeader('rolling_win_rates',w,wins,wc)}${analyticsTable(wins,wc,{id:'rolling_win_rates'})}<div class="callout warning">胜率使用重叠交易日窗口，样本彼此相关，不代表独立预测准确率。收益等于零的窗口不计入涨跌分母；无样本显示 —。</div>`,'窗口口径：1 / 5 / 21 / 63 / 126 / 252 / 378 / 504 个交易日')}`;
   bindAnalyticsActions();
   $$('.analytics-table tr[data-table-row]').forEach((tr,i)=>{const r=perfFiltered[i];if(r?.year!=null)tr.onclick=()=>{ResearchContext.selectedYear=Number(r.year);$$('.analytics-table tr').forEach(row=>row.classList.remove('selected-row'));tr.classList.add('selected-row');};});
 }
@@ -254,10 +266,11 @@ function drawdownRows(){
 }
 
 async function renderOverview(){
+  const renderSnapshotId=state.snapshotId;
   const s=state.summary,dd=drawdownRows();
-  const dayKey=`day:${ResearchContext.strategyVersion}:${ResearchContext.selectedDate}`;
-  const eventKey=`events:${ResearchContext.selectedDate}`;
-  const historyKey=`history:${state.analyticsDisplay.volWindow}`;
+  const dayKey=`${state.snapshotId}:day:${ResearchContext.strategyVersion}:${ResearchContext.selectedDate}`;
+  const eventKey=`${state.snapshotId}:events:${ResearchContext.selectedDate}`;
+  const historyKey=`${state.snapshotId}:history:${state.analyticsDisplay.volWindow}`;
   const loadCached=async(key,load)=>{
     if(state.overviewCache[key])return state.overviewCache[key];
     try{const data=await load();state.overviewCache[key]={ok:true,data};}
@@ -269,6 +282,7 @@ async function renderOverview(){
     loadCached(eventKey,()=>api(`/api/strategy/V6/events?to_date=${ResearchContext.selectedDate}&limit=8`)),
     loadCached(historyKey,()=>analytics('history',{display_window:String(state.analyticsDisplay.volWindow)}))
   ]);
+  if(renderSnapshotId!==state.snapshotId)return;
   const latest=latestResult.status==='fulfilled'?latestResult.value:{ok:false,error:latestResult.reason?.message||String(latestResult.reason)};
   const ev=eventsResult.status==='fulfilled'?eventsResult.value:{ok:false,error:eventsResult.reason?.message||String(eventsResult.reason)};
   const hist=historyResult.status==='fulfilled'?historyResult.value:{ok:false,error:historyResult.reason?.message||String(historyResult.reason)};
@@ -280,17 +294,17 @@ async function renderOverview(){
   const focus=latest.ok?latest.data.assets.slice().sort((a,b)=>Math.abs(Number(b.final_weight||0))-Math.abs(Number(a.final_weight||0))).slice(0,5):[];
   const exposures=state.exposures.find(r=>dateOnly(r.date)===ResearchContext.selectedDate);
   const trace=latest.ok?`<div class="daily-inspector"><div class="inspector-date">${esc(latest.data.resolved_date||ResearchContext.selectedDate)} ${badge('REAL DATA','success')}</div><div class="inspector-kpis"><div><small>组合净收益</small><strong class="${cls(p.portfolio_return_net)}">${signedPct(p.portfolio_return_net)}</strong></div><div><small>10VT 倍率</small><strong>${num(p.final_10vt_multiplier,3)}×</strong></div><div><small>当日换手</small><strong>${pct(p.turnover)}</strong></div><div><small>当日成本</small><strong>${pct(p.total_cost,4)}</strong></div></div><div class="section-title">主要持仓 · 当日最终名义权重</div><div class="holdings-bars">${focus.map(a=>`<button class="holding-row" type="button" data-focus-asset="${esc(a.asset)}"><span>${esc(a.asset)}</span><span class="holding-track"><i style="width:${Math.min(100,Math.abs(Number(a.final_weight||0))/2.5*100)}%;background:${a.asset_class==='bond'?'#547cce':a.asset_class==='equity'?'#d59b52':'#149982'}"></i></span><strong>${pct(a.final_weight,1)}</strong></button>`).join('')}</div><button class="side-action" data-open-page="1" type="button">穿透这一天的仓位决策 →</button></div>`:`<div class="module-failure" role="status">${esc(latest.error)}<br><button type="button" class="secondary-button" data-retry-overview="day">重试日详情</button></div>`;
-  const historyBody=`${lineChart(histRows,historySeries,{height:305,dual:historySeries.some(s=>s.axis===1)})}${hist.ok?`<small class="chart-source">${analyticsMeta(hist.data)}</small>`:`<div class="module-failure" role="status">${esc(hist.error)}<br><button type="button" class="secondary-button" data-retry-overview="history">重试历史分析</button></div>`}<button type="button" class="icon-button" data-export-png>导出 PNG</button>${hist.ok?`<button type="button" class="icon-button" data-export-csv="strategy_history" data-method="V6 daily NAV and rolling display volatility">下载 CSV</button>`:''}<details class="data-table-details"><summary>展开日频图表数据表</summary>${analyticsTable(histRows,hist.ok?historyCols:historyCols.slice(0,3),{id:'strategy_history'})}</details><div class="scrub-top"><strong id="scrubDate">${esc(ResearchContext.selectedDate)}</strong><span>点击图表选择真实交易日</span></div><input type="range" class="date-scrub" id="historyScrub" min="0" max="${Math.max(0,histRows.length-1)}" value="${Math.max(0,histRows.findIndex(r=>dateOnly(r.date)===ResearchContext.selectedDate))}" aria-label="在交易日期间滑动选择研究日期">`;
+  const historyBody=`${lineChart(histRows,historySeries,{height:305,dual:historySeries.some(s=>s.axis===1)})}${hist.ok?`<small class="chart-source">${analyticsMeta(hist.data)}</small>`:`<div class="module-failure" role="status">${esc(hist.error)}<br><button type="button" class="secondary-button" data-retry-overview="history">重试历史分析</button></div>`}<button type="button" class="icon-button" data-export-png>导出 PNG</button>${hist.ok?`<button type="button" class="icon-button" data-export-csv="strategy_history" data-method="默认策略日净值与滚动展示波动率">下载 CSV</button>`:''}<details class="data-table-details"><summary>展开日频图表数据表</summary>${analyticsTable(histRows,hist.ok?historyCols:historyCols.slice(0,3),{id:'strategy_history'})}</details><div class="scrub-top"><strong id="scrubDate">${esc(ResearchContext.selectedDate)}</strong><span>点击图表选择真实交易日</span></div><input type="range" class="date-scrub" id="historyScrub" min="0" max="${Math.max(0,histRows.length-1)}" value="${Math.max(0,histRows.findIndex(r=>dateOnly(r.date)===ResearchContext.selectedDate))}" aria-label="在交易日期间滑动选择研究日期">`;
   const eventsBody=ev.ok?`<div class="event-list compact">${recentEvents.slice(0,6).map(eventRow).join('')||'<div class="empty-state">该日期没有事件记录</div>'}</div>`:`<div class="module-failure" role="status">${esc(ev.error)}<br><button type="button" class="secondary-button" data-retry-overview="events">重试事件</button></div>`;
   $('#content').innerHTML=`
     ${researchControls()}<div class="kpi-grid overview-kpis">
-      ${kpi('年化收益',pct(s.annualized_return),'V6 formal window','accent')}
+      ${kpi('年化收益',pct(s.annualized_return),snapshotScopeLabel(),'accent')}
       ${kpi('年化波动',pct(s.annualized_vol),'样本标准差 × √252')}
       ${kpi('Sharpe',num(s.sharpe),'净收益口径')}
       ${kpi('最大回撤',pct(s.max_drawdown),'历史峰值回撤','negative')}
     </div>
     <div class="grid2 overview-featured">
-      ${panel('策略净值与展示波动率',historyBody,'NAV 来自已加载的真实 V6 系列；展示波动率是可选 Analytics 数据，不等同于 10VT 控制口径。',badge('REAL V6','success'))}
+      ${panel('策略净值与展示波动率',historyBody,`NAV 来自所选${strategyLabel}数据快照；展示波动率不等同于 10VT 控制口径。`,badge(state.snapshotId==='V6_FORMAL'?'正式基准':'扩展快照','success'))}
       ${panel('单日决策穿透',trace,'点击资产即可进入逐层决策解释')}
     </div>
     <div class="kpi-grid secondary-kpis">
@@ -305,7 +319,7 @@ async function renderOverview(){
     </div>
     <div class="grid2">
       ${panel('最近的策略研究事件',eventsBody,'点击某个事件，关联到 Decision / Attribution Explorer')}
-      ${panel('研究路线图',`<div class="research-steps"><div><span>01</span><section><strong>解释决策</strong><small>为什么选中某资产、为什么持有这个仓位？</small></section></div><div><span>02</span><section><strong>定位事件</strong><small>找到 haircut、10VT、midmonth、换月和回撤。</small></section></div><div><span>03</span><section><strong>检验假设</strong><small>使用 V6 Python 引擎执行真实反事实实验。</small></section></div></div><button type="button" class="primary-button" data-open-page="5">进入 Mode B 参数实验 →</button>`,'从历史决策走向参数实验')}
+      ${panel('研究路线图',`<div class="research-steps"><div><span>01</span><section><strong>解释决策</strong><small>为什么选中某资产、为什么持有这个仓位？</small></section></div><div><span>02</span><section><strong>定位事件</strong><small>找到 haircut、10VT、midmonth、换月和回撤。</small></section></div><div><span>03</span><section><strong>检验假设</strong><small>使用 默认策略引擎（内部审计：V6）执行真实反事实实验。</small></section></div></div><button type="button" class="primary-button" data-open-page="5">进入 Mode B 参数实验 →</button>`,'从历史决策走向参数实验')}
     </div>`;
   $$('.event-row').forEach(b=>b.addEventListener('click',()=>openEventById(b.dataset.event)));
   $$('[data-retry-overview]').forEach(b=>b.addEventListener('click',async()=>{const key={day:dayKey,events:eventKey,history:historyKey}[b.dataset.retryOverview];if(key)delete state.overviewCache[key];await renderOverview();}));
@@ -457,12 +471,12 @@ function parameterControl(p,values){
   else control=`<input name="${esc(key)}" value="${esc(Array.isArray(value)?value.join(','):value)}" ${ready?'':'disabled'} ${['target_vol','haircut','midmonth_threshold','quantile'].includes(key)?'type="number" step=".01"':''}>`;
   const baseline=shortWindows?'20D / 60D 双窗口取最大值（V6 实现）':Array.isArray(p.baseline)?p.baseline.join(' / '):p.baseline??'—';
   const semantic=key==='haircut'?'V6语义：触发后保留该倍数权重（0.5 即减仓 50%）。':'';
-  return `<div class="parameter-card ${ready?'ready':'disabled'}"><div class="parameter-top"><strong>P${p.number||'+'} · ${esc(p.label||key)}</strong>${badge(p.status||'NOT_VERIFIED',ready?'success':'neutral')}</div><div class="parameter-note">V6 baseline：<b>${esc(baseline)}</b> · 阶段：${esc(p.stage||'—')}</div><div class="parameter-control">${control}</div>${semantic?`<small>${semantic}</small>`:''}<small>${esc(p.reason||(ready?'Python 引擎支持真实重跑':'当前 V6 适配器尚未支持此项真实重跑'))}</small>${p.required_upstream?`<small>需重跑上游：${esc(Array.isArray(p.required_upstream)?p.required_upstream.join(' → '):p.required_upstream)}</small>`:''}</div>`;
+  return `<div class="parameter-card ${ready?'ready':'disabled'}"><div class="parameter-top"><strong>P${p.number||'+'} · ${esc(p.label||key)}</strong>${badge(p.status||'NOT_VERIFIED',ready?'success':'neutral')}</div><div class="parameter-note">默认策略基线（内部审计：V6）：<b>${esc(baseline)}</b> · 阶段：${esc(p.stage||'—')}</div><div class="parameter-control">${control}</div>${semantic?`<small>${semantic}</small>`:''}<small>${esc(p.reason||(ready?'Python 引擎支持真实重跑':'当前 V6 适配器尚未支持此项真实重跑'))}</small>${p.required_upstream?`<small>需重跑上游：${esc(Array.isArray(p.required_upstream)?p.required_upstream.join(' → '):p.required_upstream)}</small>`:''}</div>`;
 }
 function experimentForm(){
   const registry=state.parameterRegistry||{},orig=registry.original||[],adv=registry.advanced||[],c=state.experimentResult?.effective_params||state.experimentResult?.config||{};
   const seven=orig.map(p=>parameterControl(p,c)).join(''),advanced=adv.map(p=>parameterControl(p,c)).join('');
-  return `<form id="experimentForm"><div class="param-groups"><section class="param-group"><h4>原文七参数 · V6 baseline 锁定</h4><p class="muted">优先显示《策略复现》原始定义。只有 READY 项能进入实际 Python 重跑。</p><div class="parameter-grid">${seven||'<div class="empty-state">参数能力清单载入中</div>'}</div></section><details class="advanced-params"><summary>高级策略与成本实验</summary><div class="parameter-grid">${advanced||'<div class="empty-state">暂无能力信息</div>'}</div></details><div class="callout">展示窗口、胜率口径、资产类别和日期范围只过滤研究视图，不修改策略回测范围。实验只通过 Python API 执行。</div><button class="primary-button" type="submit" ${orig.some(p=>p.status==='READY')?'':'disabled'}>运行真实 V6 实验</button></div></form>`;
+  return `<form id="experimentForm"><div class="param-groups"><section class="param-group"><h4>原文七参数 · 默认策略基线（内部审计：V6） 锁定</h4><p class="muted">优先显示《策略复现》原始定义。只有 READY 项能进入实际 Python 重跑。</p><div class="parameter-grid">${seven||'<div class="empty-state">参数能力清单载入中</div>'}</div></section><details class="advanced-params"><summary>高级策略与成本实验</summary><div class="parameter-grid">${advanced||'<div class="empty-state">暂无能力信息</div>'}</div></details><div class="callout">展示窗口、胜率口径、资产类别和日期范围只过滤研究视图，不修改策略回测范围。实验只通过 Python API 执行。</div><button class="primary-button" type="submit" ${orig.some(p=>p.status==='READY')?'':'disabled'}>运行真实策略实验</button></div></form>`;
 }
 function readyParameters(){const reg=state.parameterRegistry||{};return [...(reg.original||[]),...(reg.advanced||[])].filter(p=>p.status==='READY');}
 function sensitivityPanel(){const ready=readyParameters(),defaultParam=ready.find(p=>p.key==='target_vol')||ready[0];return panel('单参数敏感性扫描',`<div class="sensitivity-controls"><label>READY 参数<select id="sensitivityParam">${ready.map(p=>`<option value="${esc(p.key)}" ${p.key===defaultParam?.key?'selected':''}>${esc(p.label||p.key)} · ${esc(p.key)}</option>`).join('')}</select></label><label>候选值（3–5 项，逗号分隔）<input id="sensitivityValues" value="${defaultParam?.key==='target_vol'?'8,10,12':'0.25,0.5,0.75'}"></label><div class="sensitivity-estimate" id="sensitivityEstimate">每个候选项调用一次真实 Python 回测；预计任务数：3。实际耗时取决于引擎与缓存。</div><button type="button" class="secondary-button" id="runSensitivity" ${!ready.length||state.sensitivity.running?'disabled':''}>运行敏感性扫描</button><button type="button" class="ghost-button" id="cancelSensitivity" ${state.sensitivity.running?'':'disabled'}>停止后续任务</button><div id="sensitivityStatus" class="run-status">${state.sensitivity.running?'扫描进行中':state.sensitivity.cancelRequested?'已停止排队任务':''}</div></div>${state.sensitivity.results.length?analyticsTable(state.sensitivity.results.map((r,i)=>({index:i+1,value:r.value,status:r.result?.status||'FAIL',annualized_return:r.result?.experiment?.annualized_return,max_drawdown:r.result?.experiment?.max_drawdown,config_hash:r.result?.config_hash||''})),[{key:'value',label:'候选值'},{key:'status',label:'状态'},{key:'annualized_return',label:'年化收益',render:v=>pct(v)},{key:'max_drawdown',label:'最大回撤',render:v=>pct(v)},{key:'config_hash',label:'配置哈希'}],{id:'sensitivity_results'}):'<div class="empty-state">尚无扫描结果。</div>'}`,'每次都提交 /api/experiment；浏览器不会合成或缩放回测结果。');}
@@ -472,17 +486,22 @@ function bindSensitivity(){const input=$('#sensitivityValues'),estimate=$('#sens
     state.sensitivity.running=false;run.disabled=false;cancel.disabled=true;$('#sensitivityStatus').textContent=state.sensitivity.cancelRequested?'已停止后续任务；已发出的当前请求完成后才停止。':`完成 ${state.sensitivity.results.length}/${values.length} 个真实回测。`;render();};}
 function experimentComparison(r){if(!r?.experiment)return `<div class="empty-state">运行实验后，这里将展示 Baseline 与 Experiment 的差异。</div>`;const b=state.summary,e=r.experiment;const items=[['Annualized return','annualized_return','pct'],['Annualized vol','annualized_vol','pct'],['Sharpe','sharpe','num'],['Max drawdown','max_drawdown','pct']];return `<div class="compare-grid"><div class="compare-head">BASELINE · V6</div><div class="compare-head">Experiment</div><div class="compare-head">Δ</div>${items.map(([lab,k,t])=>{const bv=b[k],ev=e[k],d=ev-bv;return `<div class="compare-cell"><strong>${lab}</strong><br>${t==='pct'?pct(bv):num(bv)}</div><div class="compare-cell">${t==='pct'?pct(ev):num(ev)}</div><div class="compare-cell ${cls(d)}">${t==='pct'?signedPct(d):(d>=0?'+':'')+num(d)}</div>`}).join('')}</div>`;}
 async function renderExperiment(){
+  if(state.snapshotId!=='V6_FORMAL'){
+    $('#content').innerHTML=panel('实验方案暂不可用',`<div class="callout warning">参数实验当前仅支持原正式回测窗口 2015-09-30—2024-11-20。请将数据快照切回正式基准后运行；扩展数据不会改变 Mode B 的计算区间。</div><button class="primary-button" type="button" id="returnFormalForExperiment">切回正式基准</button>`,'实验固定使用正式窗口与默认策略引擎（内部审计：V6）');
+    $('#returnFormalForExperiment').onclick=()=>{$('#snapshotSelector').value='V6_FORMAL';$('#snapshotSelector').dispatchEvent(new Event('change'));};
+    return;
+  }
   const costHistory=await analytics('history',{display_window:'120'});state.baselineCostRows=analyticsRows(costHistory);
-  $('#content').innerHTML=`${panel('参数能力与实验配置',experimentForm(),'能力状态由 GET /api/experiment/parameters 提供；V0.6 前端不会自行解锁参数')}${panel('实验状态',`<div class="run-status" id="experimentStatus">${state.experimentResult?`上次运行：${badge(state.experimentResult.status,state.experimentResult.status==='PASS'?'success':'warn')} · ${esc(state.experimentResult.config_hash||'')}`:'尚未运行实验'}</div><div class="callout" style="margin-top:10px">实验结果由 Python V6 engine 计算并保存至独立实验输出。V6 baseline 保持只读。</div>`,'真实引擎重跑')}${sensitivityPanel()}${state.experimentResult?renderExperimentResults(state.experimentResult):''}`;
+  $('#content').innerHTML=`${panel('参数能力与实验配置',experimentForm(),'能力状态由 GET /api/experiment/parameters 提供；前端不会自行解锁参数')}${panel('实验状态',`<div class="run-status" id="experimentStatus">${state.experimentResult?`上次运行：${badge(state.experimentResult.status,state.experimentResult.status==='PASS'?'success':'warn')} · ${esc(state.experimentResult.config_hash||'')}`:'尚未运行实验'}</div><div class="callout" style="margin-top:10px">实验结果由 Python V6 engine 计算并保存至独立实验输出。默认策略正式基准保持只读。</div>`,'真实引擎重跑')}${sensitivityPanel()}${state.experimentResult?renderExperimentResults(state.experimentResult):''}`;
   bindAnalyticsActions();bindSensitivity();
   $('#experimentForm').addEventListener('submit',async e=>{e.preventDefault();const raw=Object.fromEntries(new FormData(e.target)),f={};for(const [k,v] of Object.entries(raw)){const n=Number(v);f[k]=v!==''&&Number.isFinite(n)?n:v;}
     const cfg={momentum_excluded_count:1,risk_budget_vol_window:240,asset_short_vol_window:20,short_vol_windows:[20,60],asset_long_vol_window:240,haircut:.5,midmonth_threshold:.2,target_vol:.1,vt_window:120,quantile:.9,quantile_lookback:240,commodity_cost_bps:0,...f};
-    const status=$('#experimentStatus');status.textContent='RUNNING · 正在调用 V6 Python 引擎…';try{state.experimentResult=await api('/api/experiment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});render();}catch(err){status.innerHTML=`<span class="negative">${esc(err.message)}</span>`;}});
+    const status=$('#experimentStatus');status.textContent='RUNNING · 正在调用 默认策略引擎（内部审计：V6）…';try{state.experimentResult=await api('/api/experiment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});render();}catch(err){status.innerHTML=`<span class="negative">${esc(err.message)}</span>`;}});
 }
 function renderExperimentResults(r){
   const exp=r.experiment||r.metrics||{},baseline=state.summary,items=[['年化收益','annualized_return','pct'],['年化波动','annualized_vol','pct'],['Sharpe','sharpe','num'],['最大回撤','max_drawdown','pct'],['平均权益敞口','avg_equity_exposure','pct'],['平均债券敞口','avg_bond_exposure','pct'],['平均商品敞口','avg_commodity_exposure','pct']];
   const rows=items.map(([label,key])=>({label,baseline:baseline[key],experiment:exp[key],delta:finite(exp[key])&&finite(baseline[key])?Number(exp[key])-Number(baseline[key]):null}));
-  const kpiCols=[{key:'label',label:'指标'},{key:'baseline',label:'V6 Baseline',render:(v,row)=>row.label==='Sharpe'?num(v,3):pct(v),csv:(v,row)=>row.label==='Sharpe'?v:(finite(v)?Number(v)*100:'')},{key:'experiment',label:'Experiment',render:(v,row)=>row.label==='Sharpe'?num(v,3):pct(v),csv:(v,row)=>row.label==='Sharpe'?v:(finite(v)?Number(v)*100:'')},{key:'delta',label:'Δ',render:(v,row)=>finite(v)?(row.label==='Sharpe'?(Number(v)>=0?'+':'')+num(v,3):signedPct(v)):'—',csv:(v,row)=>row.label==='Sharpe'?v:(finite(v)?Number(v)*100:'')}];
+  const kpiCols=[{key:'label',label:'指标'},{key:'baseline',label:'默认策略基线（内部审计：V6）',render:(v,row)=>row.label==='Sharpe'?num(v,3):pct(v),csv:(v,row)=>row.label==='Sharpe'?v:(finite(v)?Number(v)*100:'')},{key:'experiment',label:'Experiment',render:(v,row)=>row.label==='Sharpe'?num(v,3):pct(v),csv:(v,row)=>row.label==='Sharpe'?v:(finite(v)?Number(v)*100:'')},{key:'delta',label:'Δ',render:(v,row)=>finite(v)?(row.label==='Sharpe'?(Number(v)>=0?'+':'')+num(v,3):signedPct(v)):'—',csv:(v,row)=>row.label==='Sharpe'?v:(finite(v)?Number(v)*100:'')}];
   const experimentHistory=inRange(analyticsRows(r.history)),baselineByDate=new Map(state.series.map(x=>[dateOnly(x.date),x.nav_net]));
   const pairedHistory=experimentHistory.map(x=>({...x,baseline_nav:baselineByDate.get(dateOnly(x.date))}));
   const expExposure=analyticsRows(r.exposure),baseExposure=new Map(state.exposures.map(x=>[dateOnly(x.date),x]));
@@ -490,21 +509,22 @@ function renderExperimentResults(r){
   const baseHistData=state.baselineCostRows||[];
   const baseCosts={contract_roll_cost:baseHistData.reduce((s,x)=>s+Number(x.contract_roll_cost||0),0),portfolio_rebalance_cost:baseHistData.reduce((s,x)=>s+Number(x.portfolio_rebalance_cost||0),0),total_cost:baseHistData.reduce((s,x)=>s+Number(x.total_cost||0),0)};
   const costRows=['contract_roll_cost','portfolio_rebalance_cost','total_cost'].map(key=>({label:key==='contract_roll_cost'?'合约换月成本（全资产）':key==='portfolio_rebalance_cost'?'组合再平衡成本':'总成本',baseline:baseCosts[key],experiment:r.costs?.[key]}));
-  const costCols=[{key:'label',label:'费用口径'},{key:'baseline',label:'V6 Baseline（%）',render:v=>pct(v,4),csv:v=>finite(v)?Number(v)*100:''},{key:'experiment',label:'Experiment（%）',render:v=>pct(v,4),csv:v=>finite(v)?Number(v)*100:''}];
+  const costCols=[{key:'label',label:'费用口径'},{key:'baseline',label:'默认策略基线（内部审计：V6）（%）',render:v=>pct(v,4),csv:v=>finite(v)?Number(v)*100:''},{key:'experiment',label:'Experiment（%）',render:v=>pct(v,4),csv:v=>finite(v)?Number(v)*100:''}];
   const eEpisodes=analyticsRows(r.drawdowns),bEpisodes=state.analytics[`${ANALYTICS_BASE}/top-drawdowns?limit=5`]?.rows||state.drawdowns;
   const eMax=eEpisodes[0]?.max_drawdown,bMax=state.summary.max_drawdown;
-  return `<div class="grid2">${panel('Baseline / Experiment KPI',analyticsTable(rows,kpiCols,{id:'experiment_kpis'}),'实验与正式 V6 同区间对比；包含最大回撤及三类平均敞口')}${panel('实验运行信息',`<div class="detail-grid">${detailItem('状态',badge(r.status||'—',r.status==='PASS'?'success':'warn'))}${detailItem('配置哈希',esc(r.config_hash||'—'))}${detailItem('生效参数',`<code>${esc(JSON.stringify(r.effective_params||{}))}</code>`)}${detailItem('阶段产物',`<code>${esc(JSON.stringify(r.stages||{}))}</code>`)}${detailItem('源哈希',`<code>${esc(JSON.stringify(r.source_hashes||{}))}</code>`)}</div>`,'以响应中的真实实验诊断为准')}</div>${panel('净值路径对比',`${lineChart(pairedHistory,[{key:'baseline_nav',label:'V6 Baseline NAV',color:'#476de0',axisLabel:'NAV（基准=1）'},{key:'nav_net',label:'Experiment NAV',color:'#139b85'}],{height:320})}<button type="button" class="icon-button" data-export-png>导出 PNG</button>`,'Baseline / Experiment 使用同一正式区间；实验逐日 NAV 来自真实 Python 输出')}${pairedExposure.length?panel('名义敞口机制对比',`${lineChart(pairedExposure,[{key:'baseline_equity',label:'Baseline Equity x',color:'#476de0',axisLabel:'名义敞口（x NAV）'},{key:'equity',label:'Experiment Equity x',color:'#7792de'},{key:'baseline_bond',label:'Baseline Bond x',color:'#139b85'},{key:'bond',label:'Experiment Bond x',color:'#79b8aa'},{key:'baseline_commodity',label:'Baseline Commodity x',color:'#cc9752'},{key:'commodity',label:'Experiment Commodity x',color:'#d9b47e'}],{height:320})}<button type="button" class="icon-button" data-export-png>导出 PNG</button>`,'三类 start-of-day 最终名义敞口真实逐日对比'):''}${panel('费用与回撤对比',`${analyticsTable(costRows,costCols,{id:'experiment_costs'})}<div class="detail-grid" style="margin-top:10px">${detailItem('V6 Baseline 最大回撤',pct(bMax))}${detailItem('Experiment 最大回撤',pct(eMax))}${detailItem('商品成本覆盖',esc(r.cost_scope||'—'))}</div>`,'日成本按回测正式区间求和；商品成本实验同时覆盖合约换月与组合再平衡')}`;
+  return `<div class="grid2">${panel('Baseline / Experiment KPI',analyticsTable(rows,kpiCols,{id:'experiment_kpis'}),'实验与正式 V6 同区间对比；包含最大回撤及三类平均敞口')}${panel('实验运行信息',`<div class="detail-grid">${detailItem('状态',badge(r.status||'—',r.status==='PASS'?'success':'warn'))}${detailItem('配置哈希',esc(r.config_hash||'—'))}${detailItem('生效参数',`<code>${esc(JSON.stringify(r.effective_params||{}))}</code>`)}${detailItem('阶段产物',`<code>${esc(JSON.stringify(r.stages||{}))}</code>`)}${detailItem('源哈希',`<code>${esc(JSON.stringify(r.source_hashes||{}))}</code>`)}</div>`,'以响应中的真实实验诊断为准')}</div>${panel('净值路径对比',`${lineChart(pairedHistory,[{key:'baseline_nav',label:'默认策略基线（内部审计：V6） NAV',color:'#476de0',axisLabel:'NAV（基准=1）'},{key:'nav_net',label:'Experiment NAV',color:'#139b85'}],{height:320})}<button type="button" class="icon-button" data-export-png>导出 PNG</button>`,'Baseline / Experiment 使用同一正式区间；实验逐日 NAV 来自真实 Python 输出')}${pairedExposure.length?panel('名义敞口机制对比',`${lineChart(pairedExposure,[{key:'baseline_equity',label:'Baseline Equity x',color:'#476de0',axisLabel:'名义敞口（x NAV）'},{key:'equity',label:'Experiment Equity x',color:'#7792de'},{key:'baseline_bond',label:'Baseline Bond x',color:'#139b85'},{key:'bond',label:'Experiment Bond x',color:'#79b8aa'},{key:'baseline_commodity',label:'Baseline Commodity x',color:'#cc9752'},{key:'commodity',label:'Experiment Commodity x',color:'#d9b47e'}],{height:320})}<button type="button" class="icon-button" data-export-png>导出 PNG</button>`,'三类 start-of-day 最终名义敞口真实逐日对比'):''}${panel('费用与回撤对比',`${analyticsTable(costRows,costCols,{id:'experiment_costs'})}<div class="detail-grid" style="margin-top:10px">${detailItem('默认策略基线（内部审计：V6） 最大回撤',pct(bMax))}${detailItem('Experiment 最大回撤',pct(eMax))}${detailItem('商品成本覆盖',esc(r.cost_scope||'—'))}</div>`,'日成本按回测正式区间求和；商品成本实验同时覆盖合约换月与组合再平衡')}`;
 }
 
 async function renderVersions(){
-  $('#content').innerHTML=`${panel('Strategy Version Registry',`<div class="version-list">${state.versions.map(v=>`<div class="version-row ${v.available?'':'disabled'}"><div class="v">${esc(v.version)}</div><div><strong>${esc(v.label)}</strong><div class="muted">${v.audited?'已独立审计；当前正式研究基准':'尚未接入 V0.6 数据链'}</div></div><div>${v.available?badge(v.status,'success'):badge(v.status,'neutral')}</div></div>`).join('')}</div>`,'V0.6 保留 version-ready 比较框架，不伪造未接入版本')}
-  ${panel('未来比较框架',`<div class="callout">接入 V5 / V7 / V8 后，版本比较将从 KPI 延伸到 Momentum、Weight Chain、10VT、Roll、Cost 与 Attribution，回答“为什么版本不同”，而不是只展示数字差。</div>`,'strategyVersion 已进入全局 Research Context')}`;
+  const current=state.versions.find(v=>v.version==='V6')||{available:true,audited:true,status:'AUDITED_BASELINE'};
+  const review=state.snapshotId==='V6_FORMAL'?'正式基准已审计；内部审计版本为 V6。':`当前扩展数据快照${snapshotReviewLabel()}；内部策略口径沿用 V6。`;
+  $('#content').innerHTML=panel('默认策略登记',`<div class="version-list"><div class="version-row"><div class="v">默认策略</div><div><strong>默认策略（内部审计：V6）</strong><div class="muted">${review}</div></div><div>${badge(state.snapshotId==='V6_FORMAL'?current.status:(snapshotOption().audit_status||'WEB_LAYER_PENDING_INDEPENDENT_REVIEW'),'neutral')}</div></div></div>`,'策略实现保持一致；可通过“数据快照”切换数据范围与审计状态。');
 }
 
 async function renderAudit(){
   const q=state.dataQuality;const qBody=q?`<div class="detail-grid">${detailItem('Expiry unverified by asset',esc(JSON.stringify(q.expiry_unverified_by_asset)))}${detailItem('Commodity cost status',esc(q.commodity_cost_status))}${detailItem('Synthetic fill','NO')}${detailItem('Formal browser engine','Snapshot/API only')}</div>`:moduleErrorHtml(state.optionalErrors?.dataQuality);
   const lineageBody=state.optionalErrors?.lineage?moduleErrorHtml(state.optionalErrors.lineage):`<div class="lineage-grid">${state.lineage.map(x=>`<div class="lineage-card"><h4>${esc(x.field)} ${badge(x.audit_status,'success')}</h4><p>${esc(x.meaning)}</p><code>${esc(x.snapshot)}</code><br><code>← ${esc(x.source_file)} :: ${esc(x.source_column)}</code></div>`).join('')}</div>`;
-  $('#content').innerHTML=`<div class="kpi-grid">${kpi('审计字段',state.lineage.length,'lineage mappings')}${kpi('Expiry 未验证',q?esc(q.expiry_unverified_count):'—','保留原状态',q?.expiry_unverified_count?'negative':'')}${kpi('Prelisting null signals',q?esc(q.prelisting_null_signal_rows):'—','no synthetic fill')}${kpi('Commodity cost','0 bps','V6 baseline / pending verification')}${kpi('Demo mode','OFF','formal runtime')}${kpi('Baseline','V6','Audited')}</div>
+  $('#content').innerHTML=`<div class="kpi-grid">${kpi('审计字段',state.lineage.length,'lineage mappings')}${kpi('Expiry 未验证',q?esc(q.expiry_unverified_count):'—','保留原状态',q?.expiry_unverified_count?'negative':'')}${kpi('Prelisting null signals',q?esc(q.prelisting_null_signal_rows):'—','no synthetic fill')}${kpi('Commodity cost','0 bps','默认策略基线（内部审计：V6） / pending verification')}${kpi('Demo mode','OFF','formal runtime')}${kpi('Baseline','V6','Audited')}</div>
   <div class="grid2">${panel('数据质量',qBody,'已知限制公开展示，不隐藏')}${panel('规则状态',ruleSummary(),'V6 implementation / assumption / pending verification 分开表达')}</div>
   ${panel('Field Lineage',lineageBody,'核心字段可以追溯到 Snapshot 与 V6 原始输出')}`;
 }
@@ -513,7 +533,7 @@ function ruleSummary(){const r=state.rules;return `<div class="detail-grid">${de
 async function render(){
   syncContextControls(); $('#content').innerHTML='<div class="loading-card">正在读取研究数据…</div>';
   try{
-    if(ResearchContext.strategyVersion!=='V6' && state.page!==6){$('#content').innerHTML='<div class="empty-state">该版本尚未接入。当前 V0.6 只开放冻结的 V6 baseline。</div>';return;}
+    if(ResearchContext.strategyVersion!=='V6' && state.page!==6){$('#content').innerHTML='<div class="empty-state">该版本尚未接入。当前仅开放默认策略（内部审计：V6）。</div>';return;}
     if(state.page===0)return await renderOverview();
     if(state.page===1)return await renderDecision();
     if(state.page===2)return await renderEvents();
@@ -526,7 +546,7 @@ async function render(){
     if(state.page===9)return await renderContributions();
     if(state.page===10)return await renderHoldings();
     if(state.page===11)return await renderDrawdowns();
-  }catch(err){$('#content').innerHTML=`<div class="error-card"><strong>本页数据暂不可用</strong><br><code>${esc(err.message)}</code><br><button type="button" class="secondary-button" id="retryPage">重试本页</button></div>`;$('#retryPage')?.addEventListener('click',()=>render());}
+  }catch(err){if(err?.name==='AbortError')return;$('#content').innerHTML=`<div class="error-card"><strong>本页数据暂不可用</strong><br><code>${esc(err.message)}</code><br><button type="button" class="secondary-button" id="retryPage">重试本页</button></div>`;$('#retryPage')?.addEventListener('click',()=>render());}
 }
 
 function setupRulesDialog(){
@@ -535,36 +555,51 @@ function setupRulesDialog(){
 }
 
 let shellBound=false;
+let initGeneration=0;
 function initFailure(err){
-  $('#content').innerHTML=`<div class="error-card"><strong>正式基准首屏加载失败</strong><br><code>${esc(err.message)}</code><p>未设置系统当天为最新交易日。检查本地服务和正式数据后可重试。</p><button type="button" class="secondary-button" id="retryInit">重试初始化</button></div>`;
+  $('#content').innerHTML=`<div class="error-card"><strong>${esc(snapshotScopeLabel())}首屏加载失败</strong><br><code>${esc(err.message)}</code><p>检查本地服务和当前数据快照后可重试。</p><button type="button" class="secondary-button" id="retryInit">重试初始化</button></div>`;
   $('#retryInit')?.addEventListener('click',()=>init());
 }
 async function init(){
-  $('#content').innerHTML='<div class="loading-card">正在连接正式基准…</div>';
-  let summary,rules,series,assets;
+  const generation=++initGeneration;
+  $('#content').innerHTML=`<div class="loading-card">正在连接${esc(snapshotScopeLabel())}…</div>`;
+  let summary,rules,series,assets,catalog;
+  try{catalog=await api('/api/data/snapshots');}catch(err){if(generation===initGeneration)initFailure(err);return;}
+  if(generation!==initGeneration)return;
+  state.snapshotOptions=(catalog.snapshots||[]).filter(x=>x.selectable);
+  if(!state.snapshotOptions.some(x=>x.snapshot_id===state.snapshotId))state.snapshotId=catalog.default_snapshot_id||'V6_FORMAL';
   try{[summary,rules,series,assets]=await Promise.all([api('/api/v6/summary'),api('/api/v6/rules'),api('/api/v6/series'),api('/api/v6/assets')]);}
-  catch(err){initFailure(err);return;}
-  if(!summary?.start_date||!summary?.end_date||!Array.isArray(series?.rows)||!series.rows.length){initFailure(new Error('GET /api/v6/summary + /api/v6/series · 正式基准缺少有效日期或 NAV 行'));return;}
+  catch(err){if(generation===initGeneration)initFailure(err);return;}
+  if(generation!==initGeneration)return;
+  if(!summary?.start_date||!summary?.end_date||!Array.isArray(series?.rows)||!series.rows.length){initFailure(new Error('GET /api/v6/summary + /api/v6/series · 当前数据快照缺少有效日期或 NAV 行'));return;}
   const optionalNames=['versions','lineage','dataQuality','drawdowns','exposures','parameterRegistry'];
   const optionalUrls=['/api/strategy/versions','/api/research/lineage','/api/research/data-quality','/api/strategy/V6/drawdowns?top=10','/api/strategy/V6/exposure-series','/api/experiment/parameters'];
   const optional=await Promise.allSettled(optionalUrls.map(url=>api(url)));
+  if(generation!==initGeneration)return;
   const values={},optionalErrors={};
   optional.forEach((result,i)=>{const name=optionalNames[i];if(result.status==='fulfilled')values[name]=result.value;else{values[name]=null;optionalErrors[name]=result.reason?.message||'请求失败';}});
   Object.assign(state,{summary,rules,series:series.rows,assets:assets.assets||[],versions:values.versions?.versions||[],lineage:values.lineage?.fields||[],dataQuality:values.dataQuality,drawdowns:values.drawdowns?.rows||[],exposures:values.exposures?.rows||[],parameterRegistry:values.parameterRegistry,optionalErrors});
+  const currentSnapshot=state.snapshotOptions.find(x=>x.snapshot_id===state.snapshotId)||state.snapshotOptions[0];
+  state.snapshotId=currentSnapshot?.snapshot_id||'V6_FORMAL';
+  $('#snapshotSelector').innerHTML=state.snapshotOptions.length?state.snapshotOptions.map(x=>`<option value="${esc(x.snapshot_id)}" ${x.snapshot_id===state.snapshotId?'selected':''}>${esc(x.display_name)}</option>`).join(''):'<option value="" disabled selected>没有可用数据快照</option>';
+  $('#snapshotSelector').value=state.snapshotId;
+  const extended=state.snapshotId!=='V6_FORMAL';
+  $('#snapshotNote').innerHTML=extended?`<strong>扩展数据快照 · 截至 ${esc(summary.end_date)}</strong> · 最后信号 ${esc(currentSnapshot?.phase3a_last_signal_date||'未知')}；${esc(snapshotReviewLabel())}。参数实验仍使用正式窗口 2015-09-30—2024-11-20。`:`<strong>正式数据快照 · 截至 ${esc(summary.end_date)}</strong> · 默认策略正式基准已审计（内部审计：V6）；分析与可视化层待独立审计。`;
   ResearchContext.selectedDate=summary.end_date;
   ResearchContext.toDate=summary.end_date;
   ResearchContext.fromDate=summary.start_date||dateOnly(state.series[0].date);
   ResearchContext.selectedAsset=state.assets.includes('IF')?'IF':state.assets[0];
   $('#selectedDate').min=summary.start_date;$('#selectedDate').max=summary.end_date;$('#fromDate').min=summary.start_date;$('#fromDate').max=summary.end_date;$('#toDate').min=summary.start_date;$('#toDate').max=summary.end_date;
-  $('#strategyVersion').innerHTML=state.versions.length?state.versions.map(v=>`<option value="${v.version}" ${v.available?'':'disabled'}>${v.version}${v.audited?' · Audited':''}</option>`).join(''):'<option value="V6">V6 · Formal baseline</option>';
+  $('#strategyVersion').innerHTML='<option value="V6">默认策略（内部审计：V6）</option>';
   $('#selectedAsset').innerHTML=state.assets.length?state.assets.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join(''):'<option value="" disabled selected>资产数据不可用</option>';
   if(!shellBound){
     bindContext(); setupRulesDialog();
+    $('#snapshotSelector').addEventListener('change',e=>{snapshotEpoch++;initGeneration++;state.snapshotId=e.target.value;state.analytics={};state.overviewCache={};state.eventRows=[];state.selectedEvent=null;state.page=0;state.mode='A';ResearchContext.selectedEventId=null;ResearchContext.selectedDate=null;ResearchContext.fromDate=null;ResearchContext.toDate=null;init();});
     $$('[data-mode]').forEach(b=>b.addEventListener('click',()=>goToPage(b.dataset.mode==='B'?5:0)));
     $$('#modeJump, [data-mode-switch]').forEach(b=>b.addEventListener('click',()=>goToPage(state.mode==='A'?5:0)));
     $('#rulesFromSide').addEventListener('click',()=>$('#rulesBtn').click());
     document.addEventListener('click',e=>{const b=e.target.closest('[data-open-page]');if(b)goToPage(Number(b.dataset.openPage));});
-    $('#exportContext').addEventListener('click',()=>{const x={strategy_version:ResearchContext.strategyVersion,selected_date:ResearchContext.selectedDate,selected_asset:ResearchContext.selectedAsset,from:ResearchContext.fromDate,to:ResearchContext.toDate,selected_event_id:ResearchContext.selectedEventId,source:'V6 formal snapshot',generated_at:new Date().toISOString()};const blob=new Blob([JSON.stringify(x,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='strategy_lab_research_context.json';a.click();URL.revokeObjectURL(url);});
+    $('#exportContext').addEventListener('click',()=>{const x={strategy_version:ResearchContext.strategyVersion,selected_date:ResearchContext.selectedDate,selected_asset:ResearchContext.selectedAsset,from:ResearchContext.fromDate,to:ResearchContext.toDate,selected_event_id:ResearchContext.selectedEventId,source:`snapshot:${state.snapshotId}`,snapshot_id:state.snapshotId,snapshot_scope:snapshotScopeLabel(),audit_status:snapshotOption().audit_status||'BASELINE_AUDITED',generated_at:new Date().toISOString()};const blob=new Blob([JSON.stringify(x,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='strategy_lab_research_context.json';a.click();URL.revokeObjectURL(url);});
     shellBound=true;
   }
   nav(); syncContextControls(); await render();

@@ -15,3 +15,5 @@ __pycache__/
 
 # Local V0.7 snapshots contain derived iFinD history and must not enter the public repo.
 data/v07_local/
+data/published_snapshots/
+data/snapshot_registry.json
