@@ -1,0 +1,27 @@
+{
+  "command": [
+    "/usr/bin/arch",
+    "-arm64",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/.venv/bin/python",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/scripts/run_v6_experiment.py",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/experiment_cache/1f8b20c2be8d617b/request.json",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/experiment_cache/1f8b20c2be8d617b"
+  ],
+  "cwd": "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6",
+  "started_utc": "2026-10-12T02:55:42.161665+00:00",
+  "completed_utc": "2026-10-12T02:57:44.267573+00:00",
+  "returncode": 0,
+  "source_hashes": {
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/scripts/run_v6_experiment.py": "3dea31fb220c679b68a07017ea849192885daf7fb841a5baeff8efc22d165ae0",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/backend/experiment_costs.py": "83a43ddc1db4bf9271cac6209f46b11b888fe0eebc0e7a10735eb93e40c5f43d",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/backend/analytics_service.py": "d4a119c5a34d0a0327f3d6d7ce4f0c2a18f28a4d79af5b1acd29fe97cdd962f3",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/backend/parameter_registry.py": "aa5eadd1bedc3a95b1093d94b4eca95373a75c17987bce9eff5a28b3b53eec30",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/backend/experiment_runner.py": "85ccf9bd00d84f111334a9651e172f853f63991897ab43c970ebb03b6818d179",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/src/phase3b.py": "93e299c244ca642f297596408be732abfe958cbcf27010c7b24d89196e840642",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/config/phase3b.yaml": "4167718f890dad0612d448293c9bfd69982401b2d1e885a07b6c01b3f80492e3",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/data/processed/phase3a/base_target_weights.parquet": "267147b52b84a86bc3ca96a44135896e4a32ec8023ccb3c714b00d4aae945736",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/data/processed/phase2/signal_returns.parquet": "1af9c0f56a2d7fd303e58b0f073599a69799cbca1a6dedb616fe1025d444a4d8",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/data/processed/phase2/trade_returns.parquet": "5c4dc161c3749241e3acf24cd91810f4b26c7f9ae9878401ff8ac0d8300b8ceb"
+  },
+  "adapter_version": 3
+}

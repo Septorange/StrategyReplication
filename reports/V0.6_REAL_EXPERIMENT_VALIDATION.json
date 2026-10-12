@@ -1,0 +1,119 @@
+{
+  "status": "PASS",
+  "checks": {
+    "target10_annualized_return": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_annualized_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_sharpe": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_max_drawdown": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_observations": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_response_nav": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_rebase": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target10_cost_identity": {
+      "max_abs_diff": 8.673617379884035e-19,
+      "status": "PASS"
+    },
+    "target12_annualized_return": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_annualized_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_sharpe": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_max_drawdown": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_observations": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_response_nav": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_rebase": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "target12_cost_identity": {
+      "max_abs_diff": 8.673617379884035e-19,
+      "status": "PASS"
+    },
+    "cost5_annualized_return": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_annualized_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_sharpe": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_max_drawdown": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_observations": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_response_nav": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_rebase": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_cost_identity": {
+      "max_abs_diff": 8.673617379884035e-19,
+      "status": "PASS"
+    },
+    "baseline_replay_daily_nav": {
+      "max_abs_diff": 4.440892098500626e-16,
+      "status": "PASS"
+    },
+    "target12_is_real_changed_series": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "cost5_roll_delta": {
+      "max_abs_diff": 7.237049501340742e-18,
+      "status": "PASS"
+    },
+    "cost5_rebalance_delta": {
+      "max_abs_diff": 2.710505431213761e-20,
+      "status": "PASS"
+    }
+  },
+  "commodity_roll_added": 0.01681608502453983,
+  "commodity_rebalance_added": 0.007261399905878802
+}

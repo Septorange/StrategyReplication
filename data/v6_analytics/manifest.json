@@ -1,0 +1,30 @@
+{
+  "strategy_version": "V6",
+  "formal_window": {
+    "from": "2015-09-30",
+    "to": "2024-11-20"
+  },
+  "observations": 2220,
+  "data_status": "REAL_V6_DERIVED",
+  "analytics_status": "NEW_UNAUDITED_VISUALIZATION_LAYER",
+  "source_hashes": {
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/data/v6_web/daily_portfolio.parquet": "91fe0856d7d8dc57aaf0c35a63ad6ada4bd6c262d9dd502be9f235197d843713",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/data/v6_web/daily_asset_state.parquet": "d652b1638abc6fdc71c8ceecb4612c59082075329b862795989852c4db6d2e7b",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/data/v6_web/summary.json": "3e7de53ed7e3f106571449d5efe535d6ebd868d21b4582cce2e987dd4e029deb",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/data/v6_web/rules.json": "651bb3ce9ae69674fe160b8d312984e405a6d260a0b86d5734166a2689728e4d",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/config/phase3a.yaml": "ce9e5c1abf9f5dd09d1da69b0e1cdac42f0ef9fbb1d4165fd1be2f3fc22b314a",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/config/phase3b.yaml": "4167718f890dad0612d448293c9bfd69982401b2d1e885a07b6c01b3f80492e3",
+    "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/src/phase3b.py": "93e299c244ca642f297596408be732abfe958cbcf27010c7b24d89196e840642"
+  },
+  "precision": "Canonical Parquet IEEE754 -> JSON full float precision, no 10-decimal web JSONL",
+  "method_version": "v1",
+  "snapshot_hashes": {
+    "annual_asset_contribution.parquet": "3a49455abeadfb0d5a31e3fab00c26c2e7c87fd0a819af9c962c6013bb685cdb",
+    "annual_class_contribution.parquet": "fffde7f5182f2e54a65167683327cfbfa541d2d1e441fb99d0a2da52c3178308",
+    "annual_performance.parquet": "595afa20504ef11d5b69c605e0525a4f22f925202d1190f7e9bd558eb6b9f6dd",
+    "class_exposure_and_vol120.parquet": "daaeae163d4744654fe7b6380b15889f6af3e208faa5705c291c5544b6b2e232",
+    "daily_class_contribution.parquet": "6a7996b8d93c588bd577e8ae72cbaeed151b9849f868f50e652f0fd08af98775",
+    "drawdown_episodes.parquet": "2489ff7730482a3849f6f8de0a3a8156d1fc38992d6c22e29ac2dee32adf5e5c",
+    "portfolio_history.parquet": "7fb7a83ccaea1f718a7982caf7f08ea8fc9792aed84bc21b5ef55be3dea1f216"
+  }
+}

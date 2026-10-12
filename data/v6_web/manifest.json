@@ -1,0 +1,58 @@
+{
+  "version": "V6",
+  "synthetic_values": false,
+  "generated_from": "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6",
+  "files": {
+    "summary.json": {
+      "sha256": "3e7de53ed7e3f106571449d5efe535d6ebd868d21b4582cce2e987dd4e029deb",
+      "bytes": 541
+    },
+    "rules.json": {
+      "sha256": "651bb3ce9ae69674fe160b8d312984e405a6d260a0b86d5734166a2689728e4d",
+      "bytes": 1792
+    },
+    "daily_portfolio.parquet": {
+      "sha256": "91fe0856d7d8dc57aaf0c35a63ad6ada4bd6c262d9dd502be9f235197d843713",
+      "bytes": 241913
+    },
+    "daily_asset_state.parquet": {
+      "sha256": "d652b1638abc6fdc71c8ceecb4612c59082075329b862795989852c4db6d2e7b",
+      "bytes": 3820330
+    },
+    "daily_roll.parquet": {
+      "sha256": "fa1a96da0b8a3e9801b9628afb90adb10b7a65d52cd6da483819e50081b174eb",
+      "bytes": 315680
+    },
+    "monthly_momentum.parquet": {
+      "sha256": "90ccf0d5fc01a7dc730534370a749351f253ff0c8f6803bb2848808b75128f26",
+      "bytes": 109234
+    },
+    "daily_portfolio.jsonl.gz": {
+      "sha256": "c708c5119be1f203a6e8083a4d037c1c5a26bf22ad7fac00f2dfb5d5dc7c33d6",
+      "bytes": 168002
+    },
+    "daily_asset_state.jsonl.gz": {
+      "sha256": "9f9044be06898a181b31fad2152278cb0efee10edea4d7ff49166bdb8204b953",
+      "bytes": 3228774
+    },
+    "daily_roll.jsonl.gz": {
+      "sha256": "c142ba7e7d74e9fbf8c3d67638ce9a07889281a4ab273f922de47811d37457da",
+      "bytes": 201592
+    },
+    "monthly_momentum.jsonl.gz": {
+      "sha256": "f91d96b4aac116f3cd43809a78b13391d33396470f4e0f9bef0f8ba0cd8ff87a",
+      "bytes": 92306
+    }
+  },
+  "derived_fields": {
+    "asset_budget": "relative_asset_budget",
+    "rb_weight": "raw_weight_before_scale = asset_budget/risk_vol",
+    "scaled_raw_weight": "raw_weight_after_scale = rb_weight*sleeve_scale",
+    "post_haircut_weight": "monthly_base_target*single_asset_haircut",
+    "pre10vt_weight": "unscaled_execution_weight",
+    "historical_threshold": "direct_threshold_q90",
+    "haircut_flag": "triggered",
+    "haircut_multiplier": "haircut"
+  },
+  "null_policy": "Unavailable fields remain null; no synthetic fill."
+}

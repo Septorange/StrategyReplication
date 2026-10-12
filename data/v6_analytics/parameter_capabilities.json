@@ -1,0 +1,167 @@
+{
+  "strategy_version": "V6",
+  "original": [
+    {
+      "number": 1,
+      "key": "momentum_excluded_count",
+      "label": "动量剔除末位数量",
+      "baseline": 1,
+      "status": "DISABLED",
+      "reason": "当前 V6 适配器尚未支持此项真实重跑；冻结 Phase3A 输入不能用于改变上游参数。",
+      "stage": "Phase3A rank_and_select",
+      "required_upstream": "完整动量排名、月度选择与基础目标权重"
+    },
+    {
+      "number": 2,
+      "key": "risk_budget_vol_window",
+      "label": "风险预算波动率窗口",
+      "baseline": 240,
+      "status": "DISABLED",
+      "reason": "当前 V6 适配器尚未支持此项真实重跑；冻结 Phase3A 输入不能用于改变上游参数。",
+      "stage": "Phase3A allocate_base_target_weights",
+      "required_upstream": "完整 sigma_240、risk budget、base_target_weights"
+    },
+    {
+      "number": 3,
+      "key": "short_vol_windows",
+      "label": "单资产短期波动率窗口",
+      "baseline": [
+        20,
+        60
+      ],
+      "status": "DISABLED",
+      "reason": "当前 V6 适配器尚未支持此项真实重跑；冻结 Phase3A 输入不能用于改变上游参数。",
+      "stage": "Phase3B single_asset_vol_control",
+      "required_upstream": "V6 baseline max(20D,60D)，未提供窗口变更适配器",
+      "baseline_label": "20D / 60D 双窗口取最大值（V6 实现）",
+      "short_vol_windows": [
+        20,
+        60
+      ]
+    },
+    {
+      "number": 4,
+      "key": "asset_long_vol_window",
+      "label": "单资产长期波动率窗口",
+      "baseline": 240,
+      "status": "DISABLED",
+      "reason": "当前 V6 适配器尚未支持此项真实重跑；冻结 Phase3A 输入不能用于改变上游参数。",
+      "stage": "Phase3B long_vol / historical threshold",
+      "required_upstream": "vol240 与历史阈值预热；冻结函数固定 long_vol=vol240"
+    },
+    {
+      "number": 5,
+      "key": "haircut",
+      "label": "单资产减仓比例",
+      "baseline": 0.5,
+      "status": "READY",
+      "reason": "真实冻结 V6 Python 函数重算",
+      "stage": "Phase3B vol_control → execution → portfolio",
+      "required_upstream": "重算单资产触发后 multiplier（0.5 = 减仓50%）"
+    },
+    {
+      "number": 6,
+      "key": "midmonth_threshold",
+      "label": "月中再平衡阈值",
+      "baseline": 0.2,
+      "status": "READY",
+      "reason": "真实冻结 V6 Python 函数重算",
+      "stage": "Phase3B execution → portfolio",
+      "required_upstream": "目标/现持仓绝对差之和，次交易日执行"
+    },
+    {
+      "number": 7,
+      "key": "target_vol",
+      "label": "组合目标波动率",
+      "baseline": 0.1,
+      "status": "READY",
+      "reason": "真实冻结 V6 Python 函数重算",
+      "stage": "Phase3B execution → portfolio",
+      "required_upstream": "完整前序 pre-10VT returns, prior-only estimator, bounds [0.5,1.5]"
+    }
+  ],
+  "advanced": [
+    {
+      "key": "vt_window",
+      "label": "10VT估计窗口",
+      "baseline": 120,
+      "status": "READY",
+      "allowed_values": [
+        60,
+        120,
+        240
+      ],
+      "stage": "Phase3B execution",
+      "reason": "prior-only pre-10VT returns"
+    },
+    {
+      "key": "quantile",
+      "label": "减仓触发分位数",
+      "baseline": 0.9,
+      "status": "READY",
+      "stage": "Phase3B vol_control",
+      "reason": "真实历史阈值重算"
+    },
+    {
+      "key": "quantile_lookback",
+      "label": "长期波动率分位数观察期",
+      "baseline": 240,
+      "status": "DISABLED",
+      "stage": "Phase3B vol_control",
+      "reason": "当前适配器保留冻结240D观察期，未开放改变预热口径"
+    },
+    {
+      "key": "commodity_cost_bps",
+      "label": "商品换月+再平衡成本",
+      "baseline": 0,
+      "status": "READY",
+      "allowed_values": [
+        0,
+        2,
+        5,
+        10
+      ],
+      "stage": "Phase2 cost overlay + Phase3B portfolio",
+      "reason": "两层成本均生效；baseline 0bps PENDING_VERIFICATION"
+    }
+  ],
+  "display": [
+    {
+      "key": "display_vol_window",
+      "baseline": 120,
+      "status": "DISPLAY_ONLY"
+    },
+    {
+      "key": "win_rate_horizon",
+      "baseline": [
+        1,
+        5,
+        21,
+        63,
+        126,
+        252,
+        378,
+        504
+      ],
+      "status": "STATISTICS_ONLY"
+    },
+    {
+      "key": "selected_class",
+      "status": "VIEW_ONLY"
+    },
+    {
+      "key": "selected_asset",
+      "status": "VIEW_ONLY"
+    },
+    {
+      "key": "analysis_from",
+      "status": "VIEW_ONLY"
+    },
+    {
+      "key": "analysis_to",
+      "status": "VIEW_ONLY"
+    }
+  ],
+  "adapter_status": "FROZEN_V6_FUNCTIONS_WITH_RESEARCH_ADAPTER_PENDING_INDEPENDENT_AUDIT",
+  "engine": "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现6/src/phase3b.py"
+}

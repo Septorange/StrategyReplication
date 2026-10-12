@@ -1,0 +1,45 @@
+{
+  "checks": {
+    "saved_NAV_tail": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "daily_asset_net_sum": {
+      "max_abs_diff": 6.002143226879753e-16,
+      "status": "PASS"
+    },
+    "daily_cost_identity": {
+      "max_abs_diff": 1.0408340855860843e-16,
+      "status": "PASS"
+    },
+    "equity_start_of_day_exposure": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "equity_120D_contribution_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "bond_start_of_day_exposure": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "bond_120D_contribution_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "commodity_start_of_day_exposure": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "commodity_120D_contribution_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    },
+    "120D_display_vol": {
+      "max_abs_diff": 0.0,
+      "status": "PASS"
+    }
+  },
+  "status": "PASS"
+}

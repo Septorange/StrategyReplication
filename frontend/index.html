@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strategy Lab · V0.6 Research Analytics</title>
+  <link rel="stylesheet" href="styles.css?v=0.6.0">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">∿</div><div><h1>Strategy Lab</h1><p>REPLAY / RESEARCH</p></div></div>
+    <div class="sidebar-divider"></div>
+    <div class="nav-caption">工作模式</div>
+    <div class="mode-choices" aria-label="工作模式">
+      <button class="mode-button active" data-mode="A" type="button"><span class="mode-letter">A</span><span><strong>策略复盘</strong><small>逐日决策 · 收益解释</small></span></button>
+      <button class="mode-button" data-mode="B" type="button"><span class="mode-letter">B</span><span><strong>参数实验</strong><small>情景比较 · 版本研究</small></span></button>
+    </div>
+    <div class="nav-caption">研究模块</div>
+    <nav id="nav" aria-label="研究模块"></nav>
+    <div class="sidebar-note"><div class="version-pill"><span class="dot"></span> V6 · 已审计基准</div><strong>Strategy Lab V0.6</strong><span>分析与可视化层新开发 · 待独立审计</span><span>本地研究工具 · 非官方策略认证</span></div>
+  </aside>
+  <main class="workspace">
+    <header class="topbar">
+      <div class="breadcrumb">STRATEGY LAB <span>/</span> <strong id="breadcrumbTitle">模式A · 策略全景</strong></div>
+      <div class="topbar-actions">
+        <span class="source-state"><span class="dot"></span> V6 REAL BASELINE</span><span class="layer-state">V0.6 ANALYTICS · 待独立审计</span>
+        <button id="exportContext" type="button" class="ghost-button">导出研究上下文</button>
+        <button id="rulesBtn" type="button" class="ghost-button">策略规则与审计</button>
+      </div>
+    </header>
+    <div class="workspace-body">
+      <div class="canvas">
+        <section class="hero">
+          <div><span class="eyebrow" id="pageEyebrow">MODE A / HISTORICAL REPLAY</span><h2 id="title">策略全景</h2><p id="subtitle">以冻结的真实 V6 数据探索业绩、归因、风险和策略事件。</p></div>
+          <div class="hero-tools"><span class="small-pill">11 个期货品种</span><button class="subtle-button" type="button" id="modeJump">进入参数实验 →</button></div>
+        </section>
+        <div class="data-note"><strong>版本状态</strong> · V6 冻结正式基准已审计；V0.6 分析与可视化层为新开发、待独立审计。商品 0 bps 为待验证的复现假设。</div>
+        <section id="content" class="content" aria-live="polite"><div class="loading-card">正在读取 V6 research snapshot…</div></section>
+      <footer class="main-foot">Strategy Lab · V0.6 Research Analytics · 真实 V6 复现研究，不构成投资建议或官方方法认证</footer>
+      </div>
+      <aside class="rightcol" aria-label="全局研究控制台">
+        <section class="panel side-panel">
+          <div class="side-heading"><div><h3>研究上下文</h3><p>日期与资产跨页面同步</p></div><span class="tiny-indicator">LIVE</span></div>
+          <section class="research-context" aria-label="Research Context">
+            <label>策略版本<select id="strategyVersion"></select></label>
+            <label>当前研究日<input id="selectedDate" type="date"></label>
+            <label>焦点资产<select id="selectedAsset"></select></label>
+            <div class="field-row"><label>区间开始<input id="fromDate" type="date"></label><label>区间结束<input id="toDate" type="date"></label></div>
+            <div class="context-event" id="contextEvent">未选择事件</div>
+          </section>
+        </section>
+        <section class="panel side-panel">
+          <div class="side-heading"><div><h3>当前复盘日</h3><p>直接取自真实策略日频状态</p></div></div>
+          <div id="sideDailySummary" class="side-daily-summary">正在载入…</div>
+          <button class="side-action" type="button" data-open-page="1">查看当日仓位决策链 →</button>
+        </section>
+        <section class="panel side-panel">
+          <div class="side-heading"><div><h3>基准策略规则</h3><p>冻结的 V6 研究配置</p></div></div>
+          <div class="rule-sheet"><div><span>三类预算</span><b>各 1/3</b></div><div><span>权益 / 债券 / 商品缩放</span><b>0.4 / 1 / 0.8</b></div><div><span>月度执行</span><b>4 交易日</b></div><div><span>10VT 目标</span><b>10% · 120D</b></div><div><span>Cap</span><b>10VT 之前</b></div><div><span>商品成本</span><b>0bps · 待核</b></div></div>
+          <button class="side-action" type="button" id="rulesFromSide">查看完整规则 →</button>
+        </section>
+        <section class="panel side-panel mode-helper"><div class="side-heading"><div><h3>两种研究模式</h3><p>A 解释历史，B 比较反事实</p></div></div><div class="helper-row"><b>A</b><span>研究某天为什么持有这个仓位</span></div><div class="helper-row"><b>B</b><span>仅修改实验配置，后端真实重跑</span></div><button class="side-action" data-mode-switch="B" type="button">切换到参数实验 →</button></section>
+      </aside>
+    </div>
+  </main>
+  <dialog id="rulesDialog"><div class="dialog-head"><div><span class="eyebrow">SOURCE OF TRUTH</span><h3>V6 规则与审计状态</h3></div><button class="close" type="button" aria-label="关闭">×</button></div><div id="rulesBody"></div></dialog>
+  <script>window.DEMO_MODE=false;</script>
+  <script src="app.js?v=0.5.1"></script>
+</body>
+</html>

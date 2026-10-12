@@ -1,0 +1,81 @@
+[
+  {
+    "name": "target10",
+    "params": {},
+    "status": "PASS",
+    "config_hash": "cc7c6289fd8aea76",
+    "experiment": {
+      "annualized_return": 0.1701916309455811,
+      "annualized_vol": 0.1024568548277687,
+      "sharpe": 1.585716951614748,
+      "max_drawdown": -0.11919211296483712,
+      "observations": 2220,
+      "mean_10vt_multiplier": 0.5971924953977912,
+      "lower_bound_hit_rate": 0.08558558558558559,
+      "avg_equity_exposure": 0.32623221094951604,
+      "avg_bond_exposure": 1.9972741405150607,
+      "avg_commodity_exposure": 0.6656967572645638
+    },
+    "costs": {
+      "contract_roll_cost": 0.032097394366439255,
+      "portfolio_rebalance_cost": 0.010955429028896766,
+      "total_cost": 0.043052823395336025
+    },
+    "output_path": "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/experiment_cache/cc7c6289fd8aea76",
+    "error": null
+  },
+  {
+    "name": "target12",
+    "params": {
+      "target_vol": 0.12
+    },
+    "status": "PASS",
+    "config_hash": "de6b168ad535e7d9",
+    "experiment": {
+      "annualized_return": 0.20456394395653033,
+      "annualized_vol": 0.12221498832771338,
+      "sharpe": 1.584582342653629,
+      "max_drawdown": -0.14156876734089752,
+      "observations": 2220,
+      "mean_10vt_multiplier": 0.713026662796571,
+      "lower_bound_hit_rate": 0.02837837837837838,
+      "avg_equity_exposure": 0.3905012017443685,
+      "avg_bond_exposure": 2.3835432423756373,
+      "avg_commodity_exposure": 0.7949913271738428
+    },
+    "costs": {
+      "contract_roll_cost": 0.038354299661862754,
+      "portfolio_rebalance_cost": 0.013287389901584862,
+      "total_cost": 0.05164168956344762
+    },
+    "output_path": "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/experiment_cache/de6b168ad535e7d9",
+    "error": null
+  },
+  {
+    "name": "cost5",
+    "params": {
+      "commodity_cost_bps": 5
+    },
+    "status": "PASS",
+    "config_hash": "72cf224605632294",
+    "experiment": {
+      "annualized_return": 0.1670003112306533,
+      "annualized_vol": 0.10244985551470548,
+      "sharpe": 1.5591476512680456,
+      "max_drawdown": -0.11999939305768614,
+      "observations": 2220,
+      "mean_10vt_multiplier": 0.5971924953977912,
+      "lower_bound_hit_rate": 0.08558558558558559,
+      "avg_equity_exposure": 0.32623221094951604,
+      "avg_bond_exposure": 1.9972741405150607,
+      "avg_commodity_exposure": 0.6656967572645638
+    },
+    "costs": {
+      "contract_roll_cost": 0.04891347939097908,
+      "portfolio_rebalance_cost": 0.018216828934775567,
+      "total_cost": 0.06713030832575465
+    },
+    "output_path": "/Users/lijiayi/Desktop/实习——中金财富/资产配置模型/资产配置模型复现/Strategy_Lab_V0.6_Research_Analytics/experiment_cache/72cf224605632294",
+    "error": null
+  }
+]

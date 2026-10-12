@@ -1,0 +1,118 @@
+{
+  "strategy_version": "V6",
+  "formal_window": {
+    "from": "2015-09-30",
+    "to": "2024-11-20"
+  },
+  "method_id": "forward_nav_ratio_overlapping_v1",
+  "data_status": "REAL_V6_DERIVED",
+  "display_vol_window": 120,
+  "units": {
+    "horizon": "trading days",
+    "win_rate": "fraction",
+    "up_avg": "return fraction",
+    "down_avg": "return fraction"
+  },
+  "rows": [
+    {
+      "horizon": 1,
+      "label": "日度",
+      "up": 1205,
+      "down": 1014,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 2219,
+      "win_rate": 0.5430374042361424,
+      "up_avg": 0.005093979404278046,
+      "down_avg": -0.004643346173939696
+    },
+    {
+      "horizon": 5,
+      "label": "周度",
+      "up": 1342,
+      "down": 873,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 2215,
+      "win_rate": 0.6058690744920994,
+      "up_avg": 0.013175257368776758,
+      "down_avg": -0.012144643700985844
+    },
+    {
+      "horizon": 21,
+      "label": "月度",
+      "up": 1470,
+      "down": 729,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 2199,
+      "win_rate": 0.6684856753069577,
+      "up_avg": 0.03219986747241156,
+      "down_avg": -0.024058412986160776
+    },
+    {
+      "horizon": 63,
+      "label": "季度",
+      "up": 1612,
+      "down": 545,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 2157,
+      "win_rate": 0.7473342605470561,
+      "up_avg": 0.06300645494703067,
+      "down_avg": -0.026346454960434088
+    },
+    {
+      "horizon": 126,
+      "label": "半年度",
+      "up": 1766,
+      "down": 328,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 2094,
+      "win_rate": 0.8433619866284623,
+      "up_avg": 0.103375157652028,
+      "down_avg": -0.02584109162572607
+    },
+    {
+      "horizon": 252,
+      "label": "年度",
+      "up": 1849,
+      "down": 119,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 1968,
+      "win_rate": 0.9395325203252033,
+      "up_avg": 0.1836055785901881,
+      "down_avg": -0.026351812000785523
+    },
+    {
+      "horizon": 378,
+      "label": "18个月",
+      "up": 1842,
+      "down": 0,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 1842,
+      "win_rate": 1.0,
+      "up_avg": 0.26725370167047885,
+      "down_avg": null
+    },
+    {
+      "horizon": 504,
+      "label": "两年度",
+      "up": 1711,
+      "down": 5,
+      "zero": 0,
+      "nonfinite": 0,
+      "windows": 1716,
+      "win_rate": 0.997086247086247,
+      "up_avg": 0.3764563313344019,
+      "down_avg": -0.00802053382640946
+    }
+  ],
+  "source_manifest_hash": "ce82da971e83b14727881ac541c64bfbef4aac990e6518f425e03979e88c0f84",
+  "analytics_audit_status": "NEW_VISUALIZATION_LAYER_PENDING_INDEPENDENT_AUDIT",
+  "overlap": true,
+  "warning": "Overlapping holding-period observations are not independent and are not predictive accuracy."
+}

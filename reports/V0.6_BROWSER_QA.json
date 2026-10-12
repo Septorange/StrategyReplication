@@ -1,0 +1,35 @@
+{
+  "status": "VERIFIED",
+  "owner": "root development browser verification, not final Sol audit",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "checks": {
+    "nav_date_to_decision": "PASS: 2020-05-12;IF17.03%;VT0.540",
+    "annual_year_to_matrix": "PASS: clicked2022SVGbar highlights2022column",
+    "drawdown_to_attribution": "PASS: sameepisode,peak/troughcontext,inclusive-note",
+    "class_filter_view_only": "PASS: Bondnominal/contributionvolchart",
+    "seven_params": "PASS: P1-4DISABLED,P5-7READY;P3max20/60",
+    "target12_real_UI": "PASS:243c9861b43777b3",
+    "scan_three_real_candidates": "PASS:8/10/12;all3savedPythonresults",
+    "scan_cancel": "PASS:inflight8completed;subsequentqueue stopped",
+    "CSV_units": "PASS:displayvol10.04115406%,classbond4.71781533pp",
+    "PNG_download": "PASS:BlobPNGwithversion/interval/legend/methodfooter",
+    "desktop1440": "PASS:screenshots",
+    "console_errors": "PASS:0",
+    "retained_event_roll_audit": "PASS:renderednoerror",
+    "port_conflict": "PASS:exit3explicit8003error"
+  },
+  "screenshots": [
+    "V0.6_attribution_1440.jpg",
+    "V0.6_decision_1440.jpg",
+    "V0.6_drawdown_1440.jpg",
+    "V0.6_experiment_1440.jpg",
+    "V0.6_holdings_1440.jpg",
+    "V0.6_home_1440.jpg",
+    "V0.6_performance_1440.jpg",
+    "V0.6_scan_1440.jpg",
+    "V0.6_winrate_1440.jpg"
+  ]
+}

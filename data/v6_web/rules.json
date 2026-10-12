@@ -1,0 +1,93 @@
+{
+  "version": "V6",
+  "class_budget": {
+    "equity": 0.3333333333333333,
+    "bond": 0.3333333333333333,
+    "commodity": 0.3333333333333333
+  },
+  "sleeve_scale": {
+    "equity": 0.4,
+    "bond": 1.0,
+    "commodity": 0.8
+  },
+  "caps": {
+    "TF": 1.25,
+    "T": 2.5,
+    "IF": 0.5,
+    "IC": 0.5,
+    "IM": 0.5,
+    "SC": 0.25,
+    "FG": 0.25,
+    "I": 0.25,
+    "M": 0.25,
+    "AU": 0.5,
+    "CU": 0.25
+  },
+  "momentum": {
+    "windows": [
+      20,
+      60,
+      240
+    ],
+    "sharpe_windows": [
+      20,
+      60,
+      240
+    ],
+    "top_n_risk_assets": 8,
+    "fixed_assets": [
+      "TF",
+      "T"
+    ]
+  },
+  "haircut": {
+    "enabled": true,
+    "method": "direct_quantile",
+    "short_vol_method": "max_20_60",
+    "long_vol_window": 240,
+    "quantile": 0.9,
+    "quantile_lookback": 240,
+    "haircut": 0.5,
+    "min_quantile_history": 120
+  },
+  "midmonth": {
+    "enabled": true,
+    "threshold": 0.2,
+    "threshold_sensitivity": [
+      0.2,
+      0.5
+    ],
+    "execution_mode": "immediate_next_day",
+    "cooldown_days": 0
+  },
+  "10vt": {
+    "enabled": true,
+    "target_vol": 0.1,
+    "estimator": "trailing_120",
+    "estimator_candidates": [
+      "trailing_60",
+      "trailing_120",
+      "trailing_240",
+      "ewma_60"
+    ],
+    "annualization_days": 252,
+    "min_history": 120,
+    "multiplier_min": 0.5,
+    "multiplier_max": 1.5
+  },
+  "roll": {
+    "mode": "instant",
+    "equity_trigger": "EQUITY_T_MINUS_5",
+    "commodity_trigger": "COMMODITY_FIXED_30D",
+    "bond_confirmation_days": 2,
+    "hard_roll_days": 5
+  },
+  "costs": {
+    "equity_bps": 5.0,
+    "bond_bps": 2.0,
+    "commodity_bps": 0.0,
+    "commodity_cost_status": "PENDING_VERIFICATION",
+    "commodity_status": "V6 baseline / PENDING_VERIFICATION"
+  },
+  "demo_mode": false
+}

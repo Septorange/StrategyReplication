@@ -1,0 +1,7 @@
+fastapi>=0.104
+uvicorn>=0.24
+pandas>=2.0
+pyarrow>=12
+PyYAML>=6
+httpx>=0.25
+pytest>=8
