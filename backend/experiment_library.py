@@ -184,4 +184,12 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
     recomputed=hashlib.sha256(json.dumps(identity_payload,sort_keys=True).encode()).hexdigest()
     if recomputed!=identity:
         raise ValueError('Saved artifact full identity digest is invalid.')
+    required_artifacts = {
+        'daily_portfolio.parquet', 'single_asset_vol_control.parquet',
+        'final_daily_weights.parquet', 'events.parquet',
+        'experiment_trade_returns.parquet', 'engine_run.json',
+    }
+    missing = sorted(name for name in required_artifacts if not (path / name).is_file())
+    if missing:
+        raise FileNotFoundError('Saved experiment stage artifacts are missing: ' + ', '.join(missing))
     return result

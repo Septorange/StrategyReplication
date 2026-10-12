@@ -549,8 +549,10 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     dates=sorted(set(fa.date).intersection(fb.date))
     if not dates:
         raise HTTPException(422,detail={'code':'NO_COMMON_OBSERVATIONS'})
-    start=request.evaluation_start or dates[0]
-    end=request.evaluation_end or dates[-1]
+    # Saved evaluations are explicit research windows. Never compare the
+    # full cached trajectory merely because the underlying runs overlap.
+    start=max(dates[0], a['from_date'], b['from_date'], request.evaluation_start or dates[0])
+    end=min(dates[-1], a['to_date'], b['to_date'], request.evaluation_end or dates[-1])
     if start not in dates or end not in dates:
         raise HTTPException(422,detail={'code':'COMPARISON_BOUNDARY_NOT_COMMON_VERIFIED_DATE',
             'common_from':dates[0],'common_latest_verified_date':dates[-1],
@@ -564,6 +566,13 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     for metrics,frame in ((ma,fa),(mb,fb)):
         for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost'):
             if col in frame: metrics[col]=float(frame[col].fillna(0).sum())
+    for metrics,source in ((ma,ra.get('exposure',{}).get('rows',[])),(mb,rb.get('exposure',{}).get('rows',[]))):
+        exposure=pd.DataFrame(source)
+        if not exposure.empty and 'date' in exposure:
+            exposure['date']=pd.to_datetime(exposure.date).dt.strftime('%Y-%m-%d')
+            exposure=exposure[exposure.date.isin(dates)]
+            for col in ('equity','bond','commodity'):
+                if col in exposure: metrics['avg_'+col+'_exposure']=float(exposure[col].mean())
     paired=[]
     for left,right in zip(fa.to_dict('records'),fb.to_dict('records')):
         paired.append({'date':left['date'],'scheme_a_nav':float((1+fa.portfolio_return_net).cumprod().iloc[len(paired)]),
