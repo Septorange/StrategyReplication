@@ -28,7 +28,13 @@ const state = {
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api = async (url, options) => { const r=await fetch(url,options); if(!r.ok) throw new Error(await r.text()); return r.json(); };
+const api = async (url, options) => {
+  let r;
+  try { r=await fetch(url,options); }
+  catch(e){ throw new Error(`${options?.method||'GET'} ${url} · 网络错误：${e?.message||'连接失败'}`); }
+  if(!r.ok){let detail='';try{detail=await r.text();}catch{}throw new Error(`${options?.method||'GET'} ${url} · HTTP ${r.status}${detail?`：${detail.slice(0,240)}`:''}`);}
+  try{return await r.json();}catch(e){throw new Error(`${options?.method||'GET'} ${url} · 响应格式错误：${e?.message||'无效 JSON'}`);}
+};
 const finite = x => x!==null && x!==undefined && x!=='' && Number.isFinite(Number(x));
 const num = (x,n=3) => finite(x) ? Number(x).toFixed(n) : '—';
 const pct = (x,n=2) => finite(x) ? `${(Number(x)*100).toFixed(n)}%` : '—';
@@ -42,6 +48,7 @@ function kpi(label,value,sub='',kind='') { return `<div class="kpi ${kind}"><div
 function badge(text,type='neutral'){ return `<span class="badge ${type}">${esc(text)}</span>`; }
 function panel(title,body,desc='',actions=''){ return `<section class="panel"><div class="panel-head"><div><h3>${esc(title)}</h3>${desc?`<p class="desc">${esc(desc)}</p>`:''}</div>${actions?`<div class="panel-actions">${actions}</div>`:''}</div>${body}</section>`; }
 function detailItem(k,v){ return `<div class="detail-item"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`; }
+function moduleErrorHtml(message){ return `<div class="error-card"><strong>此模块暂不可用</strong><br><code>${esc(message||'请求失败')}</code><br><button type="button" class="secondary-button" onclick="window.location.reload()">重试</button></div>`; }
 function table(rows, columns){
   if(!rows?.length) return `<div class="empty-state">当前筛选没有数据</div>`;
   return `<div class="table-wrap"><table><thead><tr>${columns.map(c=>`<th>${esc(c.label||c.key)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(c=>{let raw=r[c.key];let val=c.render?c.render(raw,r):esc(raw??'—');return `<td class="${c.className?c.className(raw,r):''}">${val}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -280,7 +287,7 @@ async function renderOverview(){
     </div>
     <div class="grid2">
       ${panel('组合回撤路径',lineSvg(dd,'drawdown',{height:242,markerDate:ResearchContext.selectedDate,format:'pct'}),'点击任意日期可以继续穿透')}
-      ${panel('三大类最终名义敞口',`<div class="legend"><span>Equity</span><span>Bond</span><span>Commodity</span></div>${multiLineSvg(state.exposures,['equity','bond','commodity'],{height:242,markerDate:ResearchContext.selectedDate})}`,'名义敞口可超过 100%；不等同于风险贡献')}
+      ${panel('三大类最终名义敞口',state.optionalErrors?.exposures?moduleErrorHtml(state.optionalErrors.exposures):`<div class="legend"><span>Equity</span><span>Bond</span><span>Commodity</span></div>${multiLineSvg(state.exposures,['equity','bond','commodity'],{height:242,markerDate:ResearchContext.selectedDate})}`,'名义敞口可超过 100%；不等同于风险贡献')}
     </div>
     <div class="grid2">
       ${panel('最近的策略研究事件',`<div class="event-list compact">${recentEvents.slice(0,6).map(eventRow).join('')}</div>`,'点击某个事件，关联到 Decision / Attribution Explorer')}
@@ -480,9 +487,11 @@ async function renderVersions(){
 }
 
 async function renderAudit(){
-  const q=state.dataQuality;$('#content').innerHTML=`<div class="kpi-grid">${kpi('审计字段',state.lineage.length,'lineage mappings')}${kpi('Expiry 未验证',q.expiry_unverified_count,'保留原状态',q.expiry_unverified_count?'negative':'')}${kpi('Prelisting null signals',q.prelisting_null_signal_rows,'no synthetic fill')}${kpi('Commodity cost','0 bps','V6 baseline / pending verification')}${kpi('Demo mode','OFF','formal runtime')}${kpi('Baseline','V6','Audited')}</div>
-  <div class="grid2">${panel('数据质量',`<div class="detail-grid">${detailItem('Expiry unverified by asset',esc(JSON.stringify(q.expiry_unverified_by_asset)))}${detailItem('Commodity cost status',esc(q.commodity_cost_status))}${detailItem('Synthetic fill','NO')}${detailItem('Formal browser engine','Snapshot/API only')}</div>`,'已知限制公开展示，不隐藏')}${panel('规则状态',ruleSummary(),'V6 implementation / assumption / pending verification 分开表达')}</div>
-  ${panel('Field Lineage',`<div class="lineage-grid">${state.lineage.map(x=>`<div class="lineage-card"><h4>${esc(x.field)} ${badge(x.audit_status,'success')}</h4><p>${esc(x.meaning)}</p><code>${esc(x.snapshot)}</code><br><code>← ${esc(x.source_file)} :: ${esc(x.source_column)}</code></div>`).join('')}</div>`,'核心字段可以追溯到 Snapshot 与 V6 原始输出')}`;
+  const q=state.dataQuality;const qBody=q?`<div class="detail-grid">${detailItem('Expiry unverified by asset',esc(JSON.stringify(q.expiry_unverified_by_asset)))}${detailItem('Commodity cost status',esc(q.commodity_cost_status))}${detailItem('Synthetic fill','NO')}${detailItem('Formal browser engine','Snapshot/API only')}</div>`:moduleErrorHtml(state.optionalErrors?.dataQuality);
+  const lineageBody=state.optionalErrors?.lineage?moduleErrorHtml(state.optionalErrors.lineage):`<div class="lineage-grid">${state.lineage.map(x=>`<div class="lineage-card"><h4>${esc(x.field)} ${badge(x.audit_status,'success')}</h4><p>${esc(x.meaning)}</p><code>${esc(x.snapshot)}</code><br><code>← ${esc(x.source_file)} :: ${esc(x.source_column)}</code></div>`).join('')}</div>`;
+  $('#content').innerHTML=`<div class="kpi-grid">${kpi('审计字段',state.lineage.length,'lineage mappings')}${kpi('Expiry 未验证',q?esc(q.expiry_unverified_count):'—','保留原状态',q?.expiry_unverified_count?'negative':'')}${kpi('Prelisting null signals',q?esc(q.prelisting_null_signal_rows):'—','no synthetic fill')}${kpi('Commodity cost','0 bps','V6 baseline / pending verification')}${kpi('Demo mode','OFF','formal runtime')}${kpi('Baseline','V6','Audited')}</div>
+  <div class="grid2">${panel('数据质量',qBody,'已知限制公开展示，不隐藏')}${panel('规则状态',ruleSummary(),'V6 implementation / assumption / pending verification 分开表达')}</div>
+  ${panel('Field Lineage',lineageBody,'核心字段可以追溯到 Snapshot 与 V6 原始输出')}`;
 }
 function ruleSummary(){const r=state.rules;return `<div class="detail-grid">${detailItem('Class budget','1/3 · 1/3 · 1/3')}${detailItem('Sleeve scale',`E ${num(r.sleeve_scale.equity,1)} / B ${num(r.sleeve_scale.bond,1)} / C ${num(r.sleeve_scale.commodity,1)}`)}${detailItem('10VT',`${pct(r['10vt'].target_vol)} · ${esc(r['10vt'].estimator)}`)}${detailItem('Midmonth threshold',pct(r.midmonth.threshold))}${detailItem('Roll mode',esc(r.roll.mode))}${detailItem('Commodity cost',`${num(r.costs.commodity_bps,1)} bps · PENDING_VERIFICATION`)}</div>`;}
 
@@ -502,7 +511,7 @@ async function render(){
     if(state.page===9)return await renderContributions();
     if(state.page===10)return await renderHoldings();
     if(state.page===11)return await renderDrawdowns();
-  }catch(err){$('#content').innerHTML=`<div class="error-card"><strong>页面加载失败</strong><br>${esc(err.message)}</div>`;}
+  }catch(err){$('#content').innerHTML=`<div class="error-card"><strong>本页数据暂不可用</strong><br><code>${esc(err.message)}</code><br><button type="button" class="secondary-button" id="retryPage">重试本页</button></div>`;$('#retryPage')?.addEventListener('click',()=>render());}
 }
 
 function setupRulesDialog(){
@@ -510,25 +519,40 @@ function setupRulesDialog(){
   $('#rulesDialog .close').addEventListener('click',()=>$('#rulesDialog').close());
 }
 
+let shellBound=false;
+function initFailure(err){
+  $('#content').innerHTML=`<div class="error-card"><strong>正式基准首屏加载失败</strong><br><code>${esc(err.message)}</code><p>未设置系统当天为最新交易日。检查本地服务和正式数据后可重试。</p><button type="button" class="secondary-button" id="retryInit">重试初始化</button></div>`;
+  $('#retryInit')?.addEventListener('click',()=>init());
+}
 async function init(){
-  const [summary,rules,series,assets,versions,lineage,q,drawdowns,exposures,parameterRegistry]=await Promise.all([
-    api('/api/v6/summary'),api('/api/v6/rules'),api('/api/v6/series'),api('/api/v6/assets'),api('/api/strategy/versions'),api('/api/research/lineage'),api('/api/research/data-quality'),api('/api/strategy/V6/drawdowns?top=10'),api('/api/strategy/V6/exposure-series'),api('/api/experiment/parameters').catch(()=>null)
-  ]);
-  Object.assign(state,{summary,rules,series:series.rows,assets:assets.assets,versions:versions.versions,lineage:lineage.fields,dataQuality:q,drawdowns:drawdowns.rows,exposures:exposures.rows,parameterRegistry});
+  $('#content').innerHTML='<div class="loading-card">正在连接正式基准…</div>';
+  let summary,rules,series,assets;
+  try{[summary,rules,series,assets]=await Promise.all([api('/api/v6/summary'),api('/api/v6/rules'),api('/api/v6/series'),api('/api/v6/assets')]);}
+  catch(err){initFailure(err);return;}
+  if(!summary?.start_date||!summary?.end_date||!Array.isArray(series?.rows)||!series.rows.length){initFailure(new Error('GET /api/v6/summary + /api/v6/series · 正式基准缺少有效日期或 NAV 行'));return;}
+  const optionalNames=['versions','lineage','dataQuality','drawdowns','exposures','parameterRegistry'];
+  const optionalUrls=['/api/strategy/versions','/api/research/lineage','/api/research/data-quality','/api/strategy/V6/drawdowns?top=10','/api/strategy/V6/exposure-series','/api/experiment/parameters'];
+  const optional=await Promise.allSettled(optionalUrls.map(url=>api(url)));
+  const values={},optionalErrors={};
+  optional.forEach((result,i)=>{const name=optionalNames[i];if(result.status==='fulfilled')values[name]=result.value;else{values[name]=null;optionalErrors[name]=result.reason?.message||'请求失败';}});
+  Object.assign(state,{summary,rules,series:series.rows,assets:assets.assets||[],versions:values.versions?.versions||[],lineage:values.lineage?.fields||[],dataQuality:values.dataQuality,drawdowns:values.drawdowns?.rows||[],exposures:values.exposures?.rows||[],parameterRegistry:values.parameterRegistry,optionalErrors});
   ResearchContext.selectedDate=summary.end_date;
   ResearchContext.toDate=summary.end_date;
   ResearchContext.fromDate=summary.start_date||dateOnly(state.series[0].date);
   ResearchContext.selectedAsset=state.assets.includes('IF')?'IF':state.assets[0];
   $('#selectedDate').min=summary.start_date;$('#selectedDate').max=summary.end_date;$('#fromDate').min=summary.start_date;$('#fromDate').max=summary.end_date;$('#toDate').min=summary.start_date;$('#toDate').max=summary.end_date;
-  $('#strategyVersion').innerHTML=state.versions.map(v=>`<option value="${v.version}" ${v.available?'':'disabled'}>${v.version}${v.audited?' · Audited':''}</option>`).join('');
-  $('#selectedAsset').innerHTML=state.assets.map(a=>`<option>${a}</option>`).join('');
-  bindContext(); setupRulesDialog();
-  $$('[data-mode]').forEach(b=>b.addEventListener('click',()=>goToPage(b.dataset.mode==='B'?5:0)));
-  $$('#modeJump, [data-mode-switch]').forEach(b=>b.addEventListener('click',()=>goToPage(state.mode==='A'?5:0)));
-  $('#rulesFromSide').addEventListener('click',()=>$('#rulesBtn').click());
-  document.addEventListener('click',e=>{const b=e.target.closest('[data-open-page]');if(b)goToPage(Number(b.dataset.openPage));});
-  $('#exportContext').addEventListener('click',()=>{const x={strategy_version:ResearchContext.strategyVersion,selected_date:ResearchContext.selectedDate,selected_asset:ResearchContext.selectedAsset,from:ResearchContext.fromDate,to:ResearchContext.toDate,selected_event_id:ResearchContext.selectedEventId,source:'V6 audited snapshot',generated_at:new Date().toISOString()};const blob=new Blob([JSON.stringify(x,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='strategy_lab_research_context.json';a.click();URL.revokeObjectURL(url);});
+  $('#strategyVersion').innerHTML=state.versions.length?state.versions.map(v=>`<option value="${v.version}" ${v.available?'':'disabled'}>${v.version}${v.audited?' · Audited':''}</option>`).join(''):'<option value="V6">V6 · Formal baseline</option>';
+  $('#selectedAsset').innerHTML=state.assets.length?state.assets.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join(''):'<option value="" disabled selected>资产数据不可用</option>';
+  if(!shellBound){
+    bindContext(); setupRulesDialog();
+    $$('[data-mode]').forEach(b=>b.addEventListener('click',()=>goToPage(b.dataset.mode==='B'?5:0)));
+    $$('#modeJump, [data-mode-switch]').forEach(b=>b.addEventListener('click',()=>goToPage(state.mode==='A'?5:0)));
+    $('#rulesFromSide').addEventListener('click',()=>$('#rulesBtn').click());
+    document.addEventListener('click',e=>{const b=e.target.closest('[data-open-page]');if(b)goToPage(Number(b.dataset.openPage));});
+    $('#exportContext').addEventListener('click',()=>{const x={strategy_version:ResearchContext.strategyVersion,selected_date:ResearchContext.selectedDate,selected_asset:ResearchContext.selectedAsset,from:ResearchContext.fromDate,to:ResearchContext.toDate,selected_event_id:ResearchContext.selectedEventId,source:'V6 formal snapshot',generated_at:new Date().toISOString()};const blob=new Blob([JSON.stringify(x,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='strategy_lab_research_context.json';a.click();URL.revokeObjectURL(url);});
+    shellBound=true;
+  }
   nav(); syncContextControls(); await render();
 }
 
-init().catch(err=>{$('#content').innerHTML=`<div class="error-card"><strong>初始化失败</strong><br>${esc(err.message)}</div>`;});
+init().catch(initFailure);

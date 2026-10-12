@@ -1,10 +1,24 @@
 import asyncio,httpx
+import backend.app as app_module
 from backend.app import app
 def get(path):
  async def run():
   async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as c:return await c.get(path)
  return asyncio.run(run())
-def test_health(): assert get('/api/health').json()=={'status':'ok','version':'V6','demo_mode':False,'snapshot':True}
+def test_health_reports_real_data_status_without_private_paths():
+ r=get('/api/health'); assert r.status_code==200
+ body=r.json(); assert body['service_status']=='running'; assert body['active_snapshot_id']=='V6_FORMAL'; assert body['active_data_end_date']=='2024-11-20'; assert body['formal_baseline_available'] is True; assert body['extended_snapshot_available'] is False
+ assert '/Users/' not in r.text and 'token' not in r.text.lower()
+def test_snapshot_registry_keeps_unpublished_extension_unselectable():
+ body=get('/api/data/snapshots').json(); assert body['default_snapshot_id']=='V6_FORMAL'
+ extended=next(x for x in body['snapshots'] if x['snapshot_id']=='v07_extended_10119bd207b16499')
+ assert extended['status']=='LOCAL_UNPUBLISHED' and extended['selectable'] is False
+ assert get('/api/data/snapshots/V6_FORMAL/status').status_code==200
+ assert get('/api/data/snapshots/unknown/status').status_code==404
+def test_health_survives_missing_formal_loader_and_required_api_is_explicit_503(monkeypatch):
+ monkeypatch.setattr(app_module,'loader',None)
+ assert get('/api/health').json()['service_status']=='degraded'
+ r=get('/api/v6/summary'); assert r.status_code==503 and 'FORMAL_DATA_UNAVAILABLE' in r.text
 def test_required_get_endpoints():
  for x in ['summary','rules','assets']: assert get('/api/v6/'+x).status_code==200
  for x in ['day','momentum','weights','rolls','attribution']: assert get(f'/api/v6/{x}/2024-11-20').status_code==200

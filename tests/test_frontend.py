@@ -28,3 +28,12 @@ def test_decision_pipeline_and_audit_ui_present():
     for x in ['Eligibility','Momentum','Risk Budget','Sleeve Scale','Haircut','Execution','10VT','Daily PnL','Field Lineage']:
         assert x in js
     assert '.pipeline' in css and '.event-layout' in css and '.lineage-grid' in css
+
+def test_initialization_separates_required_and_optional_requests_and_has_retry():
+    assert "Promise.all([api('/api/v6/summary')" in js
+    assert 'Promise.allSettled(optionalUrls.map(url=>api(url)))' in js
+    assert 'function initFailure(err)' in js and 'retryInit' in js
+    assert '重试本页' in js and 'optionalErrors' in js
+    assert '网络错误' in js and 'HTTP ${r.status}' in js
+    assert "ResearchContext.selectedDate=summary.end_date" in js
+    assert "new Date().toISOString()" in js  # export timestamp only; never used as a data date

@@ -1,0 +1,13 @@
+artifact,matched_rows,max_abs_diff,tolerance,status
+daily_asset_state.weight_start_of_day,24420,4.440892098500626e-16,1e-12,PASS
+daily_asset_state.final_weight,24420,4.440892098500626e-16,1e-12,PASS
+daily_asset_state.trade_return_net,24420,0.0,1e-12,PASS
+daily_asset_state.roll_cost,24420,0.0,1e-12,PASS
+daily_asset_state.rebalance_cost,24420,6.693593162382383e-17,1e-12,PASS
+daily_asset_state.asset_contribution,24420,9.996344030316351e-17,1e-12,PASS
+daily_asset_state.final_10vt_multiplier,24420,0.0,1e-12,PASS
+daily_portfolio.portfolio_return_net,2220,9.985502008591496e-17,1e-12,PASS
+daily_portfolio.contract_roll_cost,2220,9.985502008591496e-17,1e-12,PASS
+daily_portfolio.portfolio_rebalance_cost,2220,9.925870889104793e-17,1e-12,PASS
+daily_portfolio.final_10vt_multiplier,2220,0.0,1e-12,PASS
+daily_portfolio.nav_net (anchored to formal overlap),2220,7.993605777301127e-15,1e-12,PASS
