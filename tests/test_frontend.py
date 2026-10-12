@@ -37,3 +37,13 @@ def test_initialization_separates_required_and_optional_requests_and_has_retry()
     assert '网络错误' in js and 'HTTP ${r.status}' in js
     assert "ResearchContext.selectedDate=summary.end_date" in js
     assert "new Date().toISOString()" in js  # export timestamp only; never used as a data date
+
+def test_overview_optional_requests_degrade_in_separate_retryable_panels():
+    overview=js.split('async function renderOverview(){',1)[1].split('\nfunction eventRow',1)[0]
+    assert 'Promise.allSettled([' in overview
+    assert 'loadCached(dayKey' in overview and 'loadCached(eventKey' in overview and 'loadCached(historyKey' in overview
+    assert "data-retry-overview=\"day\"" in overview and "data-retry-overview=\"events\"" in overview and "data-retry-overview=\"history\"" in overview
+    assert 'delete state.overviewCache[key]' in overview
+    assert 'hist.ok?inRange(analyticsRows(hist.data)):inRange(state.series)' in overview
+    assert 'const recentEvents=ev.ok?ev.data.rows:[]' in overview
+    assert 'esc(latest.error)' in overview and 'data-retry-overview="day"' in overview

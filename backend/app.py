@@ -92,6 +92,38 @@ def _extended_local_status():
         return {'available': False, 'status': 'NOT_FOUND', 'snapshot_id': None, 'data_end_date': None, 'phase3a_last_signal_date': None, 'manifest_valid': False, 'validation_manifest_available': False, 'web_published': False}
 
 
+def _web_schema_valid(service):
+    if service is None:
+        return False
+    schemas = {
+        'portfolio': {'date','nav_net','nav_gross','portfolio_return_net','final_10vt_multiplier'},
+        'assets': {'date','asset','asset_class','weight_start_of_day','final_weight','trade_return_net','asset_contribution'},
+        'rolls': {'date','asset'},
+        'momentum': {'signal_date','asset'},
+    }
+    return all(required.issubset(set(getattr(service, name).columns)) for name,required in schemas.items())
+
+
+def _analytics_schema_valid(path: Path):
+    schemas = {
+        'portfolio_history': {'date','nav_net','nav_gross','portfolio_return_net'},
+        'annual_performance': {'period','annualized_return','max_drawdown'},
+        'annual_class_contribution': {'year','asset_class','contribution'},
+        'annual_asset_contribution': {'year','asset','asset_class','contribution','status'},
+        'class_exposure_and_vol120': {'date','equity','bond','commodity'},
+        'daily_class_contribution': {'date','equity','bond','commodity'},
+        'drawdown_episodes': {'episode_id','max_drawdown'},
+    }
+    try:
+        for name,required in schemas.items():
+            rows=json.loads((path/f'{name}.json').read_text())
+            if not isinstance(rows,list) or (rows and not required.issubset(set(rows[0]))):
+                return False
+        return True
+    except (OSError,ValueError,TypeError):
+        return False
+
+
 def guard(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -102,17 +134,22 @@ def guard(fn, *args, **kwargs):
 @app.get('/api/health')
 def health():
     formal = _snapshot_file_status(SNAPSHOT)
+    formal_analytics_manifest = _snapshot_file_status(ROOT/'data'/'v6_analytics')
+    formal['schema_valid'] = _web_schema_valid(loader)
+    formal['available'] = bool(formal['manifest_valid'] and formal['schema_valid'])
+    formal_analytics_manifest['schema_valid'] = _analytics_schema_valid(ROOT/'data'/'v6_analytics')
+    formal_analytics_manifest['available'] = bool(formal_analytics_manifest['manifest_valid'] and formal_analytics_manifest['schema_valid'] and analytics is not None)
     ext = _extended_local_status()
-    available = loader is not None and analytics is not None and formal['available']
+    available = formal['available'] and formal_analytics_manifest['available']
     return {
         'service_status': 'running' if available else 'degraded',
         'status': 'ok' if available else 'degraded',
         'version': 'V6', 'demo_mode': DEMO_MODE,
-        'active_snapshot_id': 'V6_FORMAL', 'active_snapshot_status': 'AUDITED_BASELINE' if available else 'UNAVAILABLE',
+        'active_snapshot_id': 'V6_FORMAL', 'active_snapshot_status': 'AUDITED_BASELINE' if formal['available'] else 'UNAVAILABLE',
         'active_data_end_date': loader.summary.get('end_date') if loader is not None else None,
         'formal_baseline_available': bool(formal['available'] and loader is not None),
         'extended_snapshot_available': False,
-        'formal_web': formal, 'formal_analytics': {'available': analytics is not None, 'manifest_valid': _snapshot_file_status(ROOT/'data'/'v6_analytics').get('manifest_valid', False)},
+        'formal_web': formal, 'formal_analytics': formal_analytics_manifest,
         'extended_local': ext,
         'diagnostic_codes': sorted(runtime_errors.values()),
         'snapshot': bool(formal['available'] and loader is not None),

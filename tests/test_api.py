@@ -19,6 +19,18 @@ def test_health_survives_missing_formal_loader_and_required_api_is_explicit_503(
  monkeypatch.setattr(app_module,'loader',None)
  assert get('/api/health').json()['service_status']=='degraded'
  r=get('/api/v6/summary'); assert r.status_code==503 and 'FORMAL_DATA_UNAVAILABLE' in r.text
+def test_health_is_degraded_when_analytics_manifest_is_invalid(monkeypatch):
+ original=app_module._snapshot_file_status
+ def invalid_analytics(path):
+  result=original(path)
+  if path.name=='v6_analytics': return {'available':False,'manifest_valid':False}
+  return result
+ monkeypatch.setattr(app_module,'_snapshot_file_status',invalid_analytics)
+ body=get('/api/health').json()
+ assert body['service_status']=='degraded'
+ assert body['formal_web']['available'] is True
+ assert body['formal_analytics']['available'] is False
+ assert body['formal_analytics']['manifest_valid'] is False
 def test_required_get_endpoints():
  for x in ['summary','rules','assets']: assert get('/api/v6/'+x).status_code==200
  for x in ['day','momentum','weights','rolls','attribution']: assert get(f'/api/v6/{x}/2024-11-20').status_code==200

@@ -22,7 +22,7 @@ window.ResearchContext = ResearchContext;
 const state = {
   mode:"A", page:0, summary:null, rules:null, series:[], exposures:[], assets:[], versions:[], lineage:[], dataQuality:null,
   drawdowns:[], selectedEvent:null, eventRows:[], eventFilters:{group:'', asset:''}, experimentResult:null,
-  activeDecisionStep:0, analytics:{}, parameterRegistry:null, analyticsDisplay:{assetClass:'all',volWindow:120,showGross:false,showVol:true,winRateHorizon:'all'}, experimentHistory:[], sensitivity:{running:false,cancelRequested:false,results:[],inFlight:false}, csvExports:{}
+  activeDecisionStep:0, analytics:{}, overviewCache:{}, parameterRegistry:null, analyticsDisplay:{assetClass:'all',volWindow:120,showGross:false,showVol:true,winRateHorizon:'all'}, experimentHistory:[], sensitivity:{running:false,cancelRequested:false,results:[],inFlight:false}, csvExports:{}
 };
 
 const $ = s => document.querySelector(s);
@@ -255,19 +255,33 @@ function drawdownRows(){
 
 async function renderOverview(){
   const s=state.summary,dd=drawdownRows();
-  const [latest,ev,hist]=await Promise.all([
-    api(`/api/strategy/${ResearchContext.strategyVersion}/day/${ResearchContext.selectedDate}`),
-    api(`/api/strategy/V6/events?to_date=${ResearchContext.selectedDate}&limit=8`),
-    analytics('history',{display_window:String(state.analyticsDisplay.volWindow)})
+  const dayKey=`day:${ResearchContext.strategyVersion}:${ResearchContext.selectedDate}`;
+  const eventKey=`events:${ResearchContext.selectedDate}`;
+  const historyKey=`history:${state.analyticsDisplay.volWindow}`;
+  const loadCached=async(key,load)=>{
+    if(state.overviewCache[key])return state.overviewCache[key];
+    try{const data=await load();state.overviewCache[key]={ok:true,data};}
+    catch(err){state.overviewCache[key]={ok:false,error:err?.message||String(err)};}
+    return state.overviewCache[key];
+  };
+  const [latestResult,eventsResult,historyResult]=await Promise.allSettled([
+    loadCached(dayKey,()=>api(`/api/strategy/${ResearchContext.strategyVersion}/day/${ResearchContext.selectedDate}`)),
+    loadCached(eventKey,()=>api(`/api/strategy/V6/events?to_date=${ResearchContext.selectedDate}&limit=8`)),
+    loadCached(historyKey,()=>analytics('history',{display_window:String(state.analyticsDisplay.volWindow)}))
   ]);
-  const histRows=inRange(analyticsRows(hist));
-  const historySeries=[{key:'nav_net',label:'Net NAV',color:'#476de0',axisLabel:'净值（基准=1）'},...(state.analyticsDisplay.showGross?[{key:'nav_gross',label:'Gross NAV',color:'#cc9752'}]:[]),...(state.analyticsDisplay.showVol?[{key:'display_vol',label:`${state.analyticsDisplay.volWindow}D 年化波动率`,color:'#139b85',axis:1,format:'pct',axisLabel:'年化波动率（%）'}]:[])];
+  const latest=latestResult.status==='fulfilled'?latestResult.value:{ok:false,error:latestResult.reason?.message||String(latestResult.reason)};
+  const ev=eventsResult.status==='fulfilled'?eventsResult.value:{ok:false,error:eventsResult.reason?.message||String(eventsResult.reason)};
+  const hist=historyResult.status==='fulfilled'?historyResult.value:{ok:false,error:historyResult.reason?.message||String(historyResult.reason)};
+  const histRows=hist.ok?inRange(analyticsRows(hist.data)):inRange(state.series);
+  const historySeries=[{key:'nav_net',label:'Net NAV',color:'#476de0',axisLabel:'净值（基准=1）'},...(state.analyticsDisplay.showGross?[{key:'nav_gross',label:'Gross NAV',color:'#cc9752'}]:[]),...(hist.ok&&state.analyticsDisplay.showVol?[{key:'display_vol',label:`${state.analyticsDisplay.volWindow}D 年化波动率`,color:'#139b85',axis:1,format:'pct',axisLabel:'年化波动率（%）'}]:[])];
   const historyCols=[{key:'date',label:'交易日'},{key:'nav_net',label:'Net NAV',render:v=>num(v,6)},{key:'nav_gross',label:'Gross NAV',render:v=>num(v,6)},{key:'display_vol',label:`${state.analyticsDisplay.volWindow}D 展示波动率（%）`,render:v=>pct(v),csv:v=>finite(v)?(Number(v)*100).toFixed(8):''}];
-  const recentEvents=ev.rows, p=latest.portfolio;
+  const recentEvents=ev.ok?ev.data.rows:[], p=latest.ok?latest.data.portfolio:null;
   const pos=state.series.findIndex(r=>dateOnly(r.date)===ResearchContext.selectedDate);
-  const focus=latest.assets.slice().sort((a,b)=>Math.abs(Number(b.final_weight||0))-Math.abs(Number(a.final_weight||0))).slice(0,5);
+  const focus=latest.ok?latest.data.assets.slice().sort((a,b)=>Math.abs(Number(b.final_weight||0))-Math.abs(Number(a.final_weight||0))).slice(0,5):[];
   const exposures=state.exposures.find(r=>dateOnly(r.date)===ResearchContext.selectedDate);
-  const trace=`<div class="daily-inspector"><div class="inspector-date">${esc(ResearchContext.selectedDate)} ${badge('REAL DATA','success')}</div><div class="inspector-kpis"><div><small>组合净收益</small><strong class="${cls(p.portfolio_return_net)}">${signedPct(p.portfolio_return_net)}</strong></div><div><small>10VT 倍率</small><strong>${num(p.final_10vt_multiplier,3)}×</strong></div><div><small>当日换手</small><strong>${pct(p.turnover)}</strong></div><div><small>当日成本</small><strong>${pct(p.total_cost,4)}</strong></div></div><div class="section-title">主要持仓 · 当日最终名义权重</div><div class="holdings-bars">${focus.map(a=>`<button class="holding-row" type="button" data-focus-asset="${esc(a.asset)}"><span>${esc(a.asset)}</span><span class="holding-track"><i style="width:${Math.min(100,Math.abs(Number(a.final_weight||0))/2.5*100)}%;background:${a.asset_class==='bond'?'#547cce':a.asset_class==='equity'?'#d59b52':'#149982'}"></i></span><strong>${pct(a.final_weight,1)}</strong></button>`).join('')}</div><button class="side-action" data-open-page="1" type="button">穿透这一天的仓位决策 →</button></div>`;
+  const trace=latest.ok?`<div class="daily-inspector"><div class="inspector-date">${esc(latest.data.resolved_date||ResearchContext.selectedDate)} ${badge('REAL DATA','success')}</div><div class="inspector-kpis"><div><small>组合净收益</small><strong class="${cls(p.portfolio_return_net)}">${signedPct(p.portfolio_return_net)}</strong></div><div><small>10VT 倍率</small><strong>${num(p.final_10vt_multiplier,3)}×</strong></div><div><small>当日换手</small><strong>${pct(p.turnover)}</strong></div><div><small>当日成本</small><strong>${pct(p.total_cost,4)}</strong></div></div><div class="section-title">主要持仓 · 当日最终名义权重</div><div class="holdings-bars">${focus.map(a=>`<button class="holding-row" type="button" data-focus-asset="${esc(a.asset)}"><span>${esc(a.asset)}</span><span class="holding-track"><i style="width:${Math.min(100,Math.abs(Number(a.final_weight||0))/2.5*100)}%;background:${a.asset_class==='bond'?'#547cce':a.asset_class==='equity'?'#d59b52':'#149982'}"></i></span><strong>${pct(a.final_weight,1)}</strong></button>`).join('')}</div><button class="side-action" data-open-page="1" type="button">穿透这一天的仓位决策 →</button></div>`:`<div class="module-failure" role="status">${esc(latest.error)}<br><button type="button" class="secondary-button" data-retry-overview="day">重试日详情</button></div>`;
+  const historyBody=`${lineChart(histRows,historySeries,{height:305,dual:historySeries.some(s=>s.axis===1)})}${hist.ok?`<small class="chart-source">${analyticsMeta(hist.data)}</small>`:`<div class="module-failure" role="status">${esc(hist.error)}<br><button type="button" class="secondary-button" data-retry-overview="history">重试历史分析</button></div>`}<button type="button" class="icon-button" data-export-png>导出 PNG</button>${hist.ok?`<button type="button" class="icon-button" data-export-csv="strategy_history" data-method="V6 daily NAV and rolling display volatility">下载 CSV</button>`:''}<details class="data-table-details"><summary>展开日频图表数据表</summary>${analyticsTable(histRows,hist.ok?historyCols:historyCols.slice(0,3),{id:'strategy_history'})}</details><div class="scrub-top"><strong id="scrubDate">${esc(ResearchContext.selectedDate)}</strong><span>点击图表选择真实交易日</span></div><input type="range" class="date-scrub" id="historyScrub" min="0" max="${Math.max(0,histRows.length-1)}" value="${Math.max(0,histRows.findIndex(r=>dateOnly(r.date)===ResearchContext.selectedDate))}" aria-label="在交易日期间滑动选择研究日期">`;
+  const eventsBody=ev.ok?`<div class="event-list compact">${recentEvents.slice(0,6).map(eventRow).join('')||'<div class="empty-state">该日期没有事件记录</div>'}</div>`:`<div class="module-failure" role="status">${esc(ev.error)}<br><button type="button" class="secondary-button" data-retry-overview="events">重试事件</button></div>`;
   $('#content').innerHTML=`
     ${researchControls()}<div class="kpi-grid overview-kpis">
       ${kpi('年化收益',pct(s.annualized_return),'V6 formal window','accent')}
@@ -276,7 +290,7 @@ async function renderOverview(){
       ${kpi('最大回撤',pct(s.max_drawdown),'历史峰值回撤','negative')}
     </div>
     <div class="grid2 overview-featured">
-      ${panel('策略净值与展示波动率',`${lineChart(histRows,historySeries,{height:305,dual:historySeries.some(s=>s.axis===1)})}<small class="chart-source">${analyticsMeta(hist)}</small><button type="button" class="icon-button" data-export-png>导出 PNG</button><button type="button" class="icon-button" data-export-csv="strategy_history" data-method="V6 daily NAV and rolling display volatility">下载 CSV</button><details class="data-table-details"><summary>展开日频图表数据表</summary>${analyticsTable(histRows,historyCols,{id:'strategy_history'})}</details><div class="scrub-top"><strong id="scrubDate">${esc(ResearchContext.selectedDate)}</strong><span>点击图表选择真实交易日</span></div><input type="range" class="date-scrub" id="historyScrub" min="0" max="${Math.max(0,histRows.length-1)}" value="${Math.max(0,histRows.findIndex(r=>dateOnly(r.date)===ResearchContext.selectedDate))}" aria-label="在交易日期间滑动选择研究日期">`,'净收益复利净值；展示波动率是分析诊断，不等同于 10VT 控制口径。',badge('REAL V6','success'))}
+      ${panel('策略净值与展示波动率',historyBody,'NAV 来自已加载的真实 V6 系列；展示波动率是可选 Analytics 数据，不等同于 10VT 控制口径。',badge('REAL V6','success'))}
       ${panel('单日决策穿透',trace,'点击资产即可进入逐层决策解释')}
     </div>
     <div class="kpi-grid secondary-kpis">
@@ -290,10 +304,11 @@ async function renderOverview(){
       ${panel('三大类最终名义敞口',state.optionalErrors?.exposures?moduleErrorHtml(state.optionalErrors.exposures):`<div class="legend"><span>Equity</span><span>Bond</span><span>Commodity</span></div>${multiLineSvg(state.exposures,['equity','bond','commodity'],{height:242,markerDate:ResearchContext.selectedDate})}`,'名义敞口可超过 100%；不等同于风险贡献')}
     </div>
     <div class="grid2">
-      ${panel('最近的策略研究事件',`<div class="event-list compact">${recentEvents.slice(0,6).map(eventRow).join('')}</div>`,'点击某个事件，关联到 Decision / Attribution Explorer')}
+      ${panel('最近的策略研究事件',eventsBody,'点击某个事件，关联到 Decision / Attribution Explorer')}
       ${panel('研究路线图',`<div class="research-steps"><div><span>01</span><section><strong>解释决策</strong><small>为什么选中某资产、为什么持有这个仓位？</small></section></div><div><span>02</span><section><strong>定位事件</strong><small>找到 haircut、10VT、midmonth、换月和回撤。</small></section></div><div><span>03</span><section><strong>检验假设</strong><small>使用 V6 Python 引擎执行真实反事实实验。</small></section></div></div><button type="button" class="primary-button" data-open-page="5">进入 Mode B 参数实验 →</button>`,'从历史决策走向参数实验')}
     </div>`;
   $$('.event-row').forEach(b=>b.addEventListener('click',()=>openEventById(b.dataset.event)));
+  $$('[data-retry-overview]').forEach(b=>b.addEventListener('click',async()=>{const key={day:dayKey,events:eventKey,history:historyKey}[b.dataset.retryOverview];if(key)delete state.overviewCache[key];await renderOverview();}));
   $$('#content [data-focus-asset]').forEach(b=>b.addEventListener('click',()=>{ResearchContext.selectedAsset=b.dataset.focusAsset;syncContextControls();goToPage(1)}));
   const scrub=$('#historyScrub');if(scrub)scrub.addEventListener('input',e=>{const row=state.series[Number(e.target.value)];if(!row)return;ResearchContext.selectedDate=dateOnly(row.date);$('#scrubDate').textContent=ResearchContext.selectedDate;$('#selectedDate').value=ResearchContext.selectedDate;syncContextControls();});
   if(scrub)scrub.addEventListener('change',()=>render());
