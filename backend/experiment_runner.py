@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import fcntl
 import shutil
@@ -109,6 +110,23 @@ def parquet_date_coverage_valid(path: Path, name: str, expected_dates: set[str] 
         return dates == expected_dates
     return expected_dates.issubset(dates)
 
+def parquet_result_consistent(path: Path, name: str, result: dict) -> bool:
+    if name != 'daily_portfolio.parquet':
+        return True
+    rows=result.get('history',{}).get('rows',[])
+    expected={str(row.get('date'))[:10]: float(row.get('portfolio_return_net'))
+              for row in rows if isinstance(row,dict) and row.get('date') is not None
+              and row.get('portfolio_return_net') is not None}
+    if not expected or len(expected)!=len(rows):
+        return False
+    try:
+        table=pq.read_table(path,columns=['date','portfolio_return_net'])
+        actual={str(d)[:10]: float(r) for d,r in zip(table.column('date').to_pylist(),table.column('portfolio_return_net').to_pylist())}
+    except (OSError,ValueError,TypeError):
+        return True
+    return (set(actual)==set(expected) and len(actual)==len(expected)
+            and all(math.isclose(actual[d],expected[d],rel_tol=1e-9,abs_tol=1e-12) for d in expected))
+
 def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) -> dict:
     """Validate the exact artifact contract before advertising CACHE_HIT/PASS."""
     cache_root=CACHE.resolve()
@@ -125,9 +143,11 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
             or result.get('adapter_version')!=4):
         raise ValueError('CACHE_INVALID: result identity mismatch')
     expected_rows=result_history_rows(result)
-    if expected_rows == -1:
-        raise ValueError('CACHE_INVALID: result history and baseline observations disagree')
+    if expected_rows is None or expected_rows == -1:
+        raise ValueError('CACHE_INVALID: result history and baseline observations are incomplete')
     expected_dates=result_history_dates(result)
+    if not expected_dates:
+        raise ValueError('CACHE_INVALID: result history dates are incomplete or duplicated')
     if (manifest.get('identity_sha256')!=identity_sha256 or manifest.get('config_hash')!=identity_sha256
             or manifest.get('snapshot_id')!=snapshot_id or manifest.get('cache_key')!=identity_sha256[:16]
             or manifest.get('adapter_version')!=4
@@ -145,7 +165,8 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
                 parquet=pq.ParquetFile(path)
                 if (not parquet_schema_valid(path,name)
                         or not parquet_rows_valid(path,name,expected_rows)
-                        or not parquet_date_coverage_valid(path,name,expected_dates)):
+                        or not parquet_date_coverage_valid(path,name,expected_dates)
+                        or not parquet_result_consistent(path,name,result)):
                     raise ValueError
             except Exception as exc:
                 raise ValueError(f'CACHE_INVALID: stage schema invalid {name}') from exc

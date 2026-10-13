@@ -27,6 +27,7 @@ def _write_test_parquet(path):
         elif name in strings: values[name]=pa.array(['x'])
         elif name in booleans: values[name]=pa.array([True])
         elif name.endswith('_step'): values[name]=pa.array([1],type=pa.int64())
+        elif name=='portfolio_return_net': values[name]=pa.array([0.0],type=pa.float64())
         else: values[name]=pa.array([1.0],type=pa.float64())
     pq.write_table(pa.table(values), path)
 
@@ -83,7 +84,7 @@ def test_duplicate_identities_are_idempotent_but_conflicting_rows_fail(tmp_path)
 
 def test_saved_artifact_must_match_sqlite_identity_and_cache_alias(tmp_path):
     config = {'target_vol': 0.12, 'commodity_cost_bps': 5}
-    baseline = {'start_date': '2015-09-30', 'end_date': '2024-11-20'}
+    baseline = {'start_date': '2015-09-30', 'end_date': '2015-09-30', 'observations': 1}
     source_hashes = {'phase3b.py': 'c' * 64}
     identity_payload = {'config': config, 'snapshot_id': 'V6_FORMAL', 'source_hashes': source_hashes,
                         'baseline': baseline, 'adapter_version': 4}
@@ -93,7 +94,8 @@ def test_saved_artifact_must_match_sqlite_identity_and_cache_alias(tmp_path):
     try:
         result = {'status': 'PASS', 'synthetic': False, 'config': config, 'baseline': baseline,
                   'source_hashes': source_hashes, 'snapshot_id': 'V6_FORMAL', 'config_hash': identity,
-                  'identity_sha256': identity, 'cache_key': identity[:16], 'adapter_version': 4}
+                      'identity_sha256': identity, 'cache_key': identity[:16], 'adapter_version': 4,
+                      'history': {'rows': [{'date': '2015-09-30', 'portfolio_return_net': 0.0}]}}
         result_path=artifact / 'result.json'
         result_path.write_text(json.dumps(result))
         for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
@@ -139,11 +141,13 @@ def test_same_run_is_locked_and_atomically_published_once(tmp_path, monkeypatch)
         request = json.loads(Path(command[-2]).read_text())
         output = Path(command[-1])
         calls.append(request['identity_sha256'])
+        baseline_payload={**request['baseline'],'start_date':'2015-09-30','end_date':'2015-09-30','observations':1}
         (output / 'result.json').write_text(json.dumps({
             'status': 'PASS', 'synthetic': False, 'config': request['config'],
-            'baseline': request['baseline'], 'snapshot_id': request['snapshot_id'],
+            'baseline': baseline_payload, 'snapshot_id': request['snapshot_id'],
             'config_hash': request['identity_sha256'], 'identity_sha256': request['identity_sha256'],
             'cache_key': request['cache_key'], 'adapter_version': 4,
+            'history': {'rows': [{'date':'2015-09-30', 'portfolio_return_net': 0.0}]},
         }))
         for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
                      'final_daily_weights.parquet','events.parquet',
@@ -175,7 +179,8 @@ def test_cache_hit_rejects_missing_stage_files(tmp_path, monkeypatch):
     calls=[]
     def fake_run(command, **kwargs):
         request=json.loads(Path(command[-2]).read_text()); output=Path(command[-1]); calls.append(1)
-        (output/'result.json').write_text(json.dumps({'status':'PASS','synthetic':False,'config':request['config'],'baseline':request['baseline'],'snapshot_id':request['snapshot_id'],'config_hash':request['identity_sha256'],'identity_sha256':request['identity_sha256'],'cache_key':request['cache_key'],'adapter_version':4}))
+        baseline_payload={**request['baseline'],'start_date':'2015-09-30','end_date':'2015-09-30','observations':1}
+        (output/'result.json').write_text(json.dumps({'status':'PASS','synthetic':False,'config':request['config'],'baseline':baseline_payload,'snapshot_id':request['snapshot_id'],'config_hash':request['identity_sha256'],'identity_sha256':request['identity_sha256'],'cache_key':request['cache_key'],'adapter_version':4,'history':{'rows':[{'date':'2015-09-30','portfolio_return_net':0.0}]}}))
         for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet','final_daily_weights.parquet','events.parquet','experiment_trade_returns.parquet'): _write_test_parquet(output/name)
         return SimpleNamespace(returncode=0,stdout='',stderr='')
     monkeypatch.setattr(runner_module.subprocess,'run',fake_run)
