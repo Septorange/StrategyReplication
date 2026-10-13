@@ -779,7 +779,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
                                'scheme_b_weight':asset_b.get(k),
                                'weight_delta':(asset_b.get(k,0)-asset_a.get(k,0))}
                               for k in set(asset_a)|set(asset_b)),
-                             key=lambda x:abs(x['weight_delta'] or 0),reverse=True)[:50]
+                               key=lambda x:abs(x['weight_delta'] or 0),reverse=True)
     def asset_returns(saved):
         try:
             payload=_read_parquet_columns(Path(saved['artifact_path'])/'experiment_trade_returns.parquet',['date','asset','trade_return_net'])
