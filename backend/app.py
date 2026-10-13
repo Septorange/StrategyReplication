@@ -145,7 +145,7 @@ def _safe_source_id(raw: str, index: int) -> str:
 def _clean_json(value):
     if isinstance(value,float) and not math.isfinite(value): return None
     if isinstance(value,str): return _safe_error_message(value)
-    if isinstance(value,dict): return {k:_clean_json(v) for k,v in value.items()}
+    if isinstance(value,dict): return {_safe_error_message(k):_clean_json(v) for k,v in value.items()}
     if isinstance(value,list): return [_clean_json(v) for v in value]
     return value
 

@@ -11,11 +11,12 @@ import pyarrow.parquet as pq
 
 from backend.config import ROOT
 from backend.experiment_library import ExperimentLibrary, resolve_artifact
-from backend.experiment_runner import ExperimentRunner
+from backend.experiment_runner import ExperimentRunner, REQUIRED_PARQUET_COLUMNS
 
 
 def _write_test_parquet(path):
-    pq.write_table(pa.table({'value': [1]}), path)
+    columns=REQUIRED_PARQUET_COLUMNS.get(path.name, {'value'})
+    pq.write_table(pa.table({name: [1] for name in columns}), path)
 
 
 def test_run_evaluation_and_saved_scheme_survive_library_reopen(tmp_path):
@@ -161,6 +162,10 @@ def test_cache_hit_rejects_missing_stage_files(tmp_path, monkeypatch):
     class Request:
         def model_dump(self): return {'target_vol':.12,'vt_window':120,'haircut':.5,'quantile':.9,'midmonth_threshold':.2,'commodity_cost_bps':5,'momentum_excluded_count':1,'risk_budget_vol_window':240,'asset_short_vol_window':20,'short_vol_windows':[20,60],'asset_long_vol_window':240,'quantile_lookback':240}
     runner=ExperimentRunner(baseline); first=runner.run(Request(),baseline=baseline)
+    (Path(first['artifact_path'])/'events.parquet').unlink()
+    pq.write_table(pa.table({'value':[1]}), Path(first['artifact_path'])/'events.parquet')
+    with pytest.raises(ValueError,match='CACHE_INVALID'):
+        runner.run(Request(),baseline=baseline)
     (Path(first['artifact_path'])/'events.parquet').unlink()
     with pytest.raises(FileNotFoundError,match='CACHE_INVALID'):
         runner.run(Request(),baseline=baseline)

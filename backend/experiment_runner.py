@@ -18,6 +18,23 @@ from .snapshot_registry import FORMAL_ID, get_snapshot
 REQUIRED_ARTIFACTS = ('daily_portfolio.parquet','single_asset_vol_control.parquet',
                       'final_daily_weights.parquet','events.parquet',
                       'experiment_trade_returns.parquet','engine_run.json')
+REQUIRED_PARQUET_COLUMNS = {
+    'daily_portfolio.parquet': {'date','portfolio_return_gross','portfolio_return_after_contract_roll',
+        'portfolio_return_net','contract_roll_cost','portfolio_rebalance_cost','total_cost','turnover',
+        'portfolio_vol_estimate','raw_10vt_multiplier','final_10vt_multiplier','nav_gross',
+        'nav_after_contract_roll','nav_net','rebalance_type','data_status'},
+    'single_asset_vol_control.parquet': {'date','asset','signal_return','vol_20','vol_60','vol_240',
+        'short_vol','long_vol','direct_threshold_q90','vol_ratio','ratio_threshold_q90','triggered',
+        'haircut','control_method','data_status'},
+    'final_daily_weights.parquet': {'date','asset','monthly_base_target','single_asset_haircut',
+        'controlled_target','monthly_smoothing_state','monthly_smoothing_step','midmonth_theoretical_target',
+        'deviation','midmonth_trigger','unscaled_execution_weight','portfolio_vol_estimate',
+        'raw_10vt_multiplier','final_10vt_multiplier','final_weight','weight_start_of_day',
+        'weight_end_of_day','weight_status','asset_class'},
+    'events.parquet': {'date','event_type','deviation','threshold'},
+    'experiment_trade_returns.parquet': {'date','asset','turnover','cost_bps','cost_status','roll_cost',
+        'trade_return_gross','trade_return_net'},
+}
 
 def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) -> dict:
     """Validate the exact artifact contract before advertising CACHE_HIT/PASS."""
@@ -49,7 +66,9 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
         if name.endswith('.parquet'):
             try:
                 parquet=pq.ParquetFile(path)
-                if parquet.metadata is None or parquet.metadata.num_rows <= 0 or not parquet.schema.names:
+                required=REQUIRED_PARQUET_COLUMNS[name]
+                if (parquet.metadata is None or parquet.metadata.num_rows <= 0
+                        or not required.issubset(set(parquet.schema.names))):
                     raise ValueError
             except Exception as exc:
                 raise ValueError(f'CACHE_INVALID: stage schema invalid {name}') from exc
