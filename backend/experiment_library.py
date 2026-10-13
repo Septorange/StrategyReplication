@@ -195,7 +195,10 @@ class ExperimentLibrary:
 
 
 def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
-    path = Path(saved['artifact_path']).resolve()
+    raw_path = Path(saved['artifact_path'])
+    if raw_path.is_symlink():
+        raise FileNotFoundError('Saved experiment artifact directory is a symlink.')
+    path = raw_path.resolve()
     cache_root = (ROOT / 'experiment_cache').resolve()
     if not path.is_relative_to(cache_root) or not path.is_dir():
         raise FileNotFoundError('Saved experiment artifacts are missing or outside the local cache.')
@@ -238,9 +241,23 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
     recomputed=hashlib.sha256(json.dumps(identity_payload,sort_keys=True).encode()).hexdigest()
     if recomputed!=identity:
         raise ValueError('Saved artifact full identity digest is invalid.')
-    missing = sorted(name for name in REQUIRED_ARTIFACTS if not (path / name).is_file())
-    if missing:
-        raise FileNotFoundError('Saved experiment stage artifacts are missing: ' + ', '.join(missing))
+    invalid=[]
+    for name in REQUIRED_ARTIFACTS:
+        candidate=path/name
+        resolved=candidate.resolve()
+        if (candidate.is_symlink() or not resolved.is_relative_to(path)
+                or not candidate.is_file() or candidate.stat().st_size <= 0):
+            invalid.append(name); continue
+        if name.endswith('.parquet'):
+            data=candidate.read_bytes()
+            if data[:4] != b'PAR1' or data[-4:] != b'PAR1':
+                invalid.append(name)
+        elif name=='engine_run.json':
+            try:
+                if not isinstance(json.loads(candidate.read_text()),dict): invalid.append(name)
+            except (OSError,ValueError,TypeError): invalid.append(name)
+    if invalid:
+        raise FileNotFoundError('Saved experiment stage artifacts are invalid: ' + ', '.join(sorted(invalid)))
     artifact_hashes = manifest.get('artifact_sha256')
     if not isinstance(artifact_hashes, dict):
         raise ValueError('Saved artifact manifest lacks stage file digests; legacy artifact is not certified.')

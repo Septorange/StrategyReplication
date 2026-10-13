@@ -11,6 +11,7 @@ import pandas as pd
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 from .config import FRONTEND, DEMO_MODE, ROOT, SNAPSHOT
@@ -21,7 +22,7 @@ from .schemas import (ExperimentRequest, SaveExperimentRequest, EvaluateExperime
                       CompareExperimentsRequest, CompareCheckRequest, SavedExperimentPatch)
 from .experiment_library import ExperimentLibrary, resolve_artifact
 from .experiment_runner import validate_cache_artifact
-from .analytics_service import performance
+from .analytics_service import performance, drawdown_episodes
 from .analytics_service import AnalyticsService
 from .analytics_schemas import (HistoryResponse, PerformanceResponse, WinRateResponse, ClassContributionResponse, AssetContributionResponse, ExposureResponse, DrawdownResponse)
 from .parameter_registry import parameter_capabilities
@@ -146,6 +147,11 @@ def _clean_json(value):
     if isinstance(value,dict): return {k:_clean_json(v) for k,v in value.items()}
     if isinstance(value,list): return [_clean_json(v) for v in value]
     return value
+
+def _safe_error_message(value: object) -> str:
+    """Keep diagnostics useful without returning server filesystem paths."""
+    text=str(value)
+    return re.sub(r'/(?:Users|private|home)/[^\s\"\'<>]+', '[redacted-path]', text)
 
 def _public_result(result: dict, *, evaluation: dict|None=None) -> dict:
     """Strip server paths and reduce internal stage provenance to safe IDs."""
@@ -466,7 +472,7 @@ def experiment(request: ExperimentRequest):
                 status='FAILED',config=request.model_dump(),artifact_path=ROOT/'experiment_cache'/'.failed',run_id=failed_id)
         except Exception:
             pass
-        raise HTTPException(422,detail={'code':'EXPERIMENT_INPUT_UNAVAILABLE','message':str(exc),'run_id':failed_id})
+        raise HTTPException(422,detail={'code':'EXPERIMENT_INPUT_UNAVAILABLE','message':_safe_error_message(exc),'run_id':failed_id})
     if result.get('status')!='PASS':
         return result
     identity_sha256=result.get('identity_sha256')
@@ -498,7 +504,7 @@ def _run_artifact(run_id: str):
     try:
         return run,resolve_artifact(experiment_library,saved)
     except (OSError,ValueError,json.JSONDecodeError) as exc:
-        raise HTTPException(409,detail={'code':'EXPERIMENT_ARTIFACT_UNAVAILABLE','message':str(exc),'run_id':run_id})
+        raise HTTPException(409,detail={'code':'EXPERIMENT_ARTIFACT_UNAVAILABLE','message':_safe_error_message(exc),'run_id':run_id})
 
 
 def _evaluate_result(result: dict, from_date: str, to_date: str):
@@ -518,6 +524,15 @@ def _evaluate_result(result: dict, from_date: str, to_date: str):
     if selected.empty:
         raise HTTPException(422,detail={'code':'EVALUATION_WINDOW_EMPTY','from_date':from_date,'to_date':to_date})
     metrics=performance(selected.portfolio_return_net)
+    selected=selected.copy()
+    if 'nav_net' in selected:
+        first_nav=float(selected.nav_net.iloc[0])
+        if math.isfinite(first_nav) and first_nav != 0:
+            selected['nav_net']=selected.nav_net.astype(float)/first_nav
+    if 'nav_gross' in selected:
+        first_gross=float(selected.nav_gross.iloc[0])
+        if math.isfinite(first_gross) and first_gross != 0:
+            selected['nav_gross']=selected.nav_gross.astype(float)/first_gross
     exposure=pd.DataFrame(result.get('exposure',{}).get('rows',[]))
     if not exposure.empty:
         exposure['date']=pd.to_datetime(exposure.date).dt.strftime('%Y-%m-%d')
@@ -528,8 +543,13 @@ def _evaluate_result(result: dict, from_date: str, to_date: str):
     for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost'):
         if col in selected:
             metrics[col]=float(selected[col].fillna(0).sum())
+    selected_drawdowns=drawdown_episodes(selected[['date','nav_net']].copy()) if 'nav_net' in selected else pd.DataFrame()
+    costs={col:float(selected[col].fillna(0).sum()) for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost') if col in selected}
     return {'from_date':selected.date.min(),'to_date':selected.date.max(),'metrics':metrics,
-            'rows':selected.to_dict('records')}
+            'rows':selected.to_dict('records'),
+            'exposure':{'rows':exposure.to_dict('records')},
+            'drawdowns':{'rows':selected_drawdowns.to_dict('records')},
+            'costs':costs}
 
 
 @app.post('/api/experiment/evaluations')
@@ -566,8 +586,11 @@ def save_experiment(request: SaveExperimentRequest):
 
 
 @app.get('/api/experiment/saved')
-def list_saved_experiments():
-    return {'saved':[_public_saved(x) for x in experiment_library.list_saved()]}
+def list_saved_experiments(snapshot_id: str|None = Query(None)):
+    rows=experiment_library.list_saved()
+    if snapshot_id:
+        rows=[x for x in rows if x.get('snapshot_id')==snapshot_id]
+    return {'saved':[_public_saved(x) for x in rows]}
 
 @app.get('/api/experiments')
 def list_experiments(q: str|None=None, tag: str|None=None, snapshot_id: str|None=None, status: str|None=None,
@@ -584,9 +607,11 @@ def list_experiments(q: str|None=None, tag: str|None=None, snapshot_id: str|None
 def get_experiment_run(run_id: str):
     run=experiment_library.get_run(run_id)
     if not run: raise HTTPException(404,detail={'code':'EXPERIMENT_RUN_NOT_FOUND','run_id':run_id})
-    try: validate_cache_artifact(Path(run['artifact_path']),run['config_hash'],run['snapshot_id'])
+    try:
+        if run.get('status')=='PASS':
+            validate_cache_artifact(Path(run['artifact_path']),run['config_hash'],run['snapshot_id'])
     except Exception as exc:
-        run['status']='CACHE_INVALID'; run['error_code']='ARTIFACT_UNAVAILABLE'; run['error_summary']=str(exc)[:300]
+        run['status']='CACHE_INVALID'; run['error_code']='ARTIFACT_UNAVAILABLE'; run['error_summary']=_safe_error_message(exc)[:300]
     run.pop('artifact_path',None)
     return run
 
@@ -598,14 +623,16 @@ def get_experiment_series(run_id: str):
 
 
 @app.get('/api/experiment/saved/{scheme_id}')
-def open_saved_experiment(scheme_id: str):
+def open_saved_experiment(scheme_id: str, snapshot_id: str|None = Query(None)):
     saved=experiment_library.get_saved(scheme_id)
     if not saved:
         raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND','scheme_id':scheme_id})
+    if snapshot_id and saved.get('snapshot_id')!=snapshot_id:
+        raise HTTPException(409,detail={'code':'SAVED_SCHEME_SNAPSHOT_MISMATCH','scheme_snapshot_id':saved.get('snapshot_id'),'requested_snapshot_id':snapshot_id})
     try:
         result=resolve_artifact(experiment_library,saved)
     except (OSError,ValueError,json.JSONDecodeError) as exc:
-        raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':str(exc)})
+        raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':_safe_error_message(exc)})
     rows=result.get('history',{}).get('rows',[])
     available_from=min((str(x['date'])[:10] for x in rows),default=saved['from_date'])
     available_to=max((str(x['date'])[:10] for x in rows),default=saved['to_date'])
@@ -615,6 +642,9 @@ def open_saved_experiment(scheme_id: str):
     full_history=result.get('history',{})
     result['run_full_history']=full_history
     result['history']={'rows':evaluation['rows']}
+    result['exposure']=evaluation['exposure']
+    result['drawdowns']=evaluation['drawdowns']
+    result['costs']=evaluation['costs']
     result['experiment']=evaluation['metrics']
     result.update(run_id=saved['run_id'],evaluation_id=saved['evaluation_id'],
                   evaluation={'from_date':saved['from_date'],'to_date':saved['to_date'],
@@ -642,7 +672,7 @@ def check_saved_comparison(request: CompareCheckRequest):
     if not a or not b: raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND'})
     try: resolve_artifact(experiment_library,a); resolve_artifact(experiment_library,b)
     except (OSError,ValueError,json.JSONDecodeError) as exc:
-        return {'status':'NOT_COMPARABLE','reasons':[str(exc)],'warnings':[]}
+        return {'status':'NOT_COMPARABLE','reasons':[_safe_error_message(exc)],'warnings':[]}
     return _compatibility(a,b)
 
 
@@ -657,7 +687,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     try:
         ra,rb=resolve_artifact(experiment_library,a),resolve_artifact(experiment_library,b)
     except (OSError,ValueError,json.JSONDecodeError) as exc:
-        raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':str(exc)})
+        raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':_safe_error_message(exc)})
     fa=pd.DataFrame(ra['history']['rows']); fb=pd.DataFrame(rb['history']['rows'])
     for frame in (fa,fb): frame['date']=pd.to_datetime(frame.date).dt.strftime('%Y-%m-%d')
     dates=sorted(set(fa.date).intersection(fb.date))

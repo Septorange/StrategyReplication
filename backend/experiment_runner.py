@@ -20,9 +20,11 @@ REQUIRED_ARTIFACTS = ('daily_portfolio.parquet','single_asset_vol_control.parque
 
 def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) -> dict:
     """Validate the exact artifact contract before advertising CACHE_HIT/PASS."""
-    if not dest.is_dir(): raise FileNotFoundError('CACHE_INVALID: artifact directory missing')
+    cache_root=CACHE.resolve()
+    if dest.is_symlink() or not dest.resolve().is_relative_to(cache_root) or not dest.is_dir():
+        raise FileNotFoundError('CACHE_INVALID: artifact directory outside cache root')
     result_path, manifest_path = dest/'result.json', dest/'artifact_manifest.json'
-    if not result_path.is_file() or not manifest_path.is_file():
+    if result_path.is_symlink() or manifest_path.is_symlink() or not result_path.is_file() or not manifest_path.is_file():
         raise FileNotFoundError('CACHE_INVALID: result or manifest missing')
     result=json.loads(result_path.read_text()); manifest=json.loads(manifest_path.read_text())
     if result.get('status')!='PASS' or result.get('synthetic') is not False:
@@ -40,7 +42,15 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
     if not isinstance(hashes,dict): raise ValueError('CACHE_INVALID: stage digests missing')
     for name in REQUIRED_ARTIFACTS:
         path=dest/name
-        if not path.is_file(): raise FileNotFoundError(f'CACHE_INVALID: stage missing {name}')
+        resolved=path.resolve()
+        if path.is_symlink() or not resolved.is_relative_to(dest.resolve()) or not path.is_file() or path.stat().st_size <= 0:
+            raise FileNotFoundError(f'CACHE_INVALID: stage path invalid {name}')
+        if name.endswith('.parquet'):
+            with path.open('rb') as stream:
+                if stream.read(4) != b'PAR1' or path.read_bytes()[-4:] != b'PAR1':
+                    raise ValueError(f'CACHE_INVALID: stage schema invalid {name}')
+        elif name=='engine_run.json' and not isinstance(json.loads(path.read_text()),dict):
+            raise ValueError('CACHE_INVALID: engine metadata schema invalid')
         if hashes.get(name)!=hashlib.sha256(path.read_bytes()).hexdigest():
             raise ValueError(f'CACHE_INVALID: stage digest mismatch {name}')
     return result

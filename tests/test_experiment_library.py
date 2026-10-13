@@ -71,7 +71,10 @@ def test_saved_artifact_must_match_sqlite_identity_and_cache_alias(tmp_path):
         for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
                      'final_daily_weights.parquet','events.parquet',
                      'experiment_trade_returns.parquet','engine_run.json'):
-            (artifact/name).touch()
+            if name.endswith('.parquet'):
+                (artifact/name).write_bytes(b'PAR1testPAR1')
+            else:
+                (artifact/name).write_text('{}')
         (artifact/'artifact_manifest.json').write_text(json.dumps({
             'identity_sha256':identity,'config_hash':identity,'snapshot_id':'V6_FORMAL',
             'cache_key':identity[:16],'adapter_version':4,
@@ -117,7 +120,7 @@ def test_same_run_is_locked_and_atomically_published_once(tmp_path, monkeypatch)
         for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet',
                      'final_daily_weights.parquet','events.parquet',
                      'experiment_trade_returns.parquet'):
-            (output / name).touch()
+            (output / name).write_bytes(b'PAR1testPAR1')
         return SimpleNamespace(returncode=0, stdout='ok', stderr='')
 
     monkeypatch.setattr(runner_module.subprocess, 'run', fake_subprocess_run)
@@ -145,7 +148,7 @@ def test_cache_hit_rejects_missing_stage_files(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
         request=json.loads(Path(command[-2]).read_text()); output=Path(command[-1]); calls.append(1)
         (output/'result.json').write_text(json.dumps({'status':'PASS','synthetic':False,'config':request['config'],'baseline':request['baseline'],'snapshot_id':request['snapshot_id'],'config_hash':request['identity_sha256'],'identity_sha256':request['identity_sha256'],'cache_key':request['cache_key'],'adapter_version':4}))
-        for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet','final_daily_weights.parquet','events.parquet','experiment_trade_returns.parquet'): (output/name).touch()
+        for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet','final_daily_weights.parquet','events.parquet','experiment_trade_returns.parquet'): (output/name).write_bytes(b'PAR1testPAR1')
         return SimpleNamespace(returncode=0,stdout='',stderr='')
     monkeypatch.setattr(runner_module.subprocess,'run',fake_run)
     baseline=json.loads((ROOT/'data/v6_web/summary.json').read_text())
