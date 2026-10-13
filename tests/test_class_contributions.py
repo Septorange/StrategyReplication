@@ -32,7 +32,8 @@ def test_missing_or_ambiguous_class_is_unavailable_not_guessed():
     assert aggregate_class_contributions(values, values, ambiguous, ambiguous) == ([], [], 2)
 
 
-def test_compare_reads_turnover_and_classes_from_real_stage(monkeypatch):
+@pytest.mark.parametrize('missing_trade', [False, True])
+def test_compare_reads_turnover_and_classes_from_real_stage(monkeypatch, missing_trade):
     import importlib
     api = importlib.import_module('backend.app')
     from backend.schemas import CompareExperimentsRequest
@@ -49,10 +50,17 @@ def test_compare_reads_turnover_and_classes_from_real_stage(monkeypatch):
             return {'date':days,'turnover':[.12,.34]}
         if path.name == 'final_daily_weights.parquet':
             return {'date':days,'asset':['IF','IF'],'final_weight':[1.,1.], 'asset_class':['Equity','Equity']}
-        return {'date':days,'asset':['IF','IF'],'trade_return_net':[.01,.01]}
+        return {'date':days,'asset':['IF','IF'],'trade_return_net':[None if missing_trade else .01,.01]}
     monkeypatch.setattr(api, '_read_parquet_columns', read)
     result = api.compare_saved_experiments(CompareExperimentsRequest(scheme_a='a',scheme_b='b'))
     assert [x['scheme_a_turnover'] for x in result['history']] == [.12,.34]
+    if missing_trade:
+        assert result['class_contribution_status'] == 'NOT_AVAILABLE'
+        assert result['asset_contribution_status'] == 'NOT_AVAILABLE'
+        assert len(result['contribution_closure_errors']) == 2
+        assert result['class_annual_contributions'] == []
+        assert result['asset_annual_contributions'] == []
+        return
     assert result['class_contribution_status'] == 'AVAILABLE'
     assert len(result['class_return_contributions']) == 2
     assert len(result['class_annual_contributions']) == 2

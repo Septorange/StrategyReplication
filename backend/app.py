@@ -883,6 +883,21 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
                            'scheme_b_contribution':v[1],'contribution_delta':v[2]}
                           for k,v in annual_contribution_map.items()]
     class_daily, class_annual, class_missing = aggregate_class_contributions(ca, cb, da, db)
+    missing_contributions = sum(x['contribution_delta'] is None for x in asset_contributions)
+    closure_errors = []
+    for label, contributions, frame in (('A',ca,fa),('B',cb,fb)):
+        totals = {}
+        for (day, _), value in contributions.items():
+            totals[day] = totals.get(day, 0.0) + value
+        for row in frame.itertuples():
+            actual = totals.get(str(row.date))
+            if actual is None or not math.isfinite(actual) or abs(actual-float(row.portfolio_return_net)) > 1e-10:
+                closure_errors.append({'scheme':label,'date':str(row.date),'code':'NET_CONTRIBUTION_NOT_CLOSED'})
+    contribution_available = bool(asset_contributions) and not missing_contributions and not closure_errors
+    if not contribution_available:
+        # Partial annual totals could appear plausible despite missing daily
+        # returns. Expose diagnostics, never a partially summed attribution.
+        asset_contributions, annual_contributions, class_daily, class_annual = [], [], [], []
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
@@ -893,15 +908,16 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             'asset_annual_contributions':annual_contributions,
             'class_return_contributions':class_daily,
             'class_annual_contributions':class_annual,
-            'class_contribution_missing_count':class_missing,
-            'class_contribution_status':'AVAILABLE' if class_daily and not class_missing else 'NOT_AVAILABLE',
+            'class_contribution_missing_count':class_missing + missing_contributions,
+            'class_contribution_status':'AVAILABLE' if class_daily and not class_missing and contribution_available else 'NOT_AVAILABLE',
             'contribution_method':'ARITHMETIC_NET_CONTRIBUTION_WITH_ABSOLUTE_CONTRIBUTION_REBALANCE_COST_ALLOCATION',
             'contribution_units':'decimal portfolio return; annual values are arithmetic sums, not compounded returns',
-            'asset_contribution_missing_count':sum(x['contribution_delta'] is None for x in asset_contributions),
+            'asset_contribution_missing_count':missing_contributions,
+            'contribution_closure_errors':closure_errors,
             'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
                                   'missing_days_a':missing_a,'missing_days_b':missing_b,
                                   'missing_day_count_a':len(missing_a),'missing_day_count_b':len(missing_b)},
-            'asset_contribution_status':'UNAVAILABLE_FROM_CACHED_STAGE' if not asset_differences else 'FINAL_WEIGHT_DECISION_DIFFS',
+            'asset_contribution_status':'AVAILABLE' if contribution_available else 'NOT_AVAILABLE',
             'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
 
 
