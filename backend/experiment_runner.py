@@ -65,7 +65,12 @@ def _read_parquet_columns(path: Path, columns: list[str]) -> dict[str, list] | N
                 "t=pq.read_table(p,columns=cols); "
                 "print(json.dumps({c:[str(x) if c=='date' else x for x in t.column(c).to_pylist()] for c in cols}, default=str))")
         try:
-            proc=subprocess.run([str(V6_PYTHON),'-c',script,str(path),json.dumps(columns)],
+            reader=[str(V6_PYTHON)]
+            # The desktop service may run the x86_64 Anaconda runtime under
+            # Rosetta while the project's pinned venv is native arm64.
+            if os.uname().sysname == 'Darwin' and os.uname().machine == 'x86_64':
+                reader=['/usr/bin/arch','-arm64',str(V6_PYTHON)]
+            proc=subprocess.run(reader+['-c',script,str(path),json.dumps(columns)],
                                 capture_output=True,text=True,check=False,timeout=30)
             if proc.returncode != 0: return None
             return json.loads(proc.stdout)
