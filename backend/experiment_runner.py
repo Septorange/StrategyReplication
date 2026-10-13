@@ -48,6 +48,30 @@ PARQUET_BOOLEAN_COLUMNS = {
     'final_daily_weights.parquet': {'midmonth_trigger'},
 }
 
+def _read_parquet_columns(path: Path, columns: list[str]) -> dict[str, list] | None:
+    """Read data pages with the primary runtime, then the project's V6 reader.
+
+    The service runtime's older Arrow can reject valid V6 pages with a
+    repetition-level error.  The pinned V6 virtualenv is the producer's
+    reader and provides an independent decode path; a failure in both readers
+    remains a hard cache failure.
+    """
+    try:
+        table=pq.read_table(path,columns=columns)
+        return {name:[str(x) if name=='date' else x for x in table.column(name).to_pylist()] for name in columns}
+    except (OSError,ValueError,TypeError):
+        script=("import json,sys; import pyarrow.parquet as pq; "
+                "p=sys.argv[1]; cols=json.loads(sys.argv[2]); "
+                "t=pq.read_table(p,columns=cols); "
+                "print(json.dumps({c:[str(x) if c=='date' else x for x in t.column(c).to_pylist()] for c in cols}, default=str))")
+        try:
+            proc=subprocess.run([str(V6_PYTHON),'-c',script,str(path),json.dumps(columns)],
+                                capture_output=True,text=True,check=False,timeout=30)
+            if proc.returncode != 0: return None
+            return json.loads(proc.stdout)
+        except (OSError,ValueError,TypeError,subprocess.SubprocessError):
+            return None
+
 def parquet_schema_valid(path: Path, name: str) -> bool:
     parquet=pq.ParquetFile(path)
     if parquet.metadata is None or parquet.metadata.num_rows <= 0:
@@ -98,14 +122,9 @@ def result_history_dates(result: dict) -> set[str] | None:
 def parquet_date_coverage_valid(path: Path, name: str, expected_dates: set[str] | None) -> bool:
     if not expected_dates:
         return True
-    try:
-        values=pq.read_table(path,columns=['date']).column('date').to_pylist()
-    except (OSError,ValueError,TypeError):
-        # A cache hit is a claim that the dates were verified. Decode errors
-        # therefore invalidate the artifact instead of silently trusting only
-        # its metadata and digest.
-        return False
-    dates={str(value)[:10] for value in values}
+    payload=_read_parquet_columns(path,['date'])
+    if payload is None: return False
+    dates={str(value)[:10] for value in payload['date']}
     if name == 'daily_portfolio.parquet':
         return dates == expected_dates
     return expected_dates.issubset(dates)
@@ -119,11 +138,9 @@ def parquet_result_consistent(path: Path, name: str, result: dict) -> bool:
               and row.get('portfolio_return_net') is not None}
     if not expected or len(expected)!=len(rows):
         return False
-    try:
-        table=pq.read_table(path,columns=['date','portfolio_return_net'])
-        actual={str(d)[:10]: float(r) for d,r in zip(table.column('date').to_pylist(),table.column('portfolio_return_net').to_pylist())}
-    except (OSError,ValueError,TypeError):
-        return False
+    payload=_read_parquet_columns(path,['date','portfolio_return_net'])
+    if payload is None: return False
+    actual={str(d)[:10]: float(r) for d,r in zip(payload['date'],payload['portfolio_return_net'])}
     return (set(actual)==set(expected) and len(actual)==len(expected)
             and all(math.isclose(actual[d],expected[d],rel_tol=1e-9,abs_tol=1e-12) for d in expected))
 
