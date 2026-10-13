@@ -2,7 +2,7 @@
 
 日期：2026-10-13
 
-本轮已停止功能开发、反复测试和 Sol 调用。当前分支为 `feature/v07-phase2-experiment-library`，代码修复父提交为 `b58272ab1ecbe25c3b9c8d7e34f3f9e9a37afc34`，本地 checkpoint 提交为 `bc745e9ef8465f4ad024623318bd59a0fc56a639`。
+本轮已停止功能开发、反复测试和 Sol 调用。当前分支为 `feature/v07-phase2-experiment-library`，代码修复父提交为 `b58272ab1ecbe25c3b9c8d7e34f3f9e9a37afc34`，本地 checkpoint 提交为 `f0eb4036ec87d60aa2a9f13aa074e6a1529ec586`；之后仅补充了本段 SHA 说明。
 
 已保存的工作包括：Phase 2.1 的 F01–F06 修复链、严格缓存产物校验、保存评估窗口恢复、API 路径脱敏、方案库管理、真实逐日比较、分类/资产贡献聚合、换手阶段数据读取、缺失收益的闭合检查，以及审计交接和冻结文件清单。SQLite 实验方案、运行缓存和既有报告均保留在本机。
 
