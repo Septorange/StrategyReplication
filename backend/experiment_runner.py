@@ -101,10 +101,10 @@ def parquet_date_coverage_valid(path: Path, name: str, expected_dates: set[str] 
     try:
         values=pq.read_table(path,columns=['date']).column('date').to_pylist()
     except (OSError,ValueError,TypeError):
-        # A small set of legacy artifacts uses a Parquet encoding that the
-        # bundled reader cannot decode. Schema, row-count, and digest checks
-        # still apply; newly written artifacts are fully date-checked here.
-        return True
+        # A cache hit is a claim that the dates were verified. Decode errors
+        # therefore invalidate the artifact instead of silently trusting only
+        # its metadata and digest.
+        return False
     dates={str(value)[:10] for value in values}
     if name == 'daily_portfolio.parquet':
         return dates == expected_dates
@@ -123,7 +123,7 @@ def parquet_result_consistent(path: Path, name: str, result: dict) -> bool:
         table=pq.read_table(path,columns=['date','portfolio_return_net'])
         actual={str(d)[:10]: float(r) for d,r in zip(table.column('date').to_pylist(),table.column('portfolio_return_net').to_pylist())}
     except (OSError,ValueError,TypeError):
-        return True
+        return False
     return (set(actual)==set(expected) and len(actual)==len(expected)
             and all(math.isclose(actual[d],expected[d],rel_tol=1e-9,abs_tol=1e-12) for d in expected))
 

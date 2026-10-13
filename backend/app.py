@@ -730,6 +730,8 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     eb={str(x.get('date'))[:10]:x for x in rb.get('exposure',{}).get('rows',[])}
     for left,right in zip(fa.to_dict('records'),fb.to_dict('records')):
         idx=len(paired); day=left['date']; xa,xb=ea.get(day,{}),eb.get(day,{})
+        weight_delta=sum(abs(float(xa.get(col) or 0)-float(xb.get(col) or 0)) for col in ('equity','bond','commodity'))
+        multiplier_delta=abs(float(left.get('final_10vt_multiplier') or 0)-float(right.get('final_10vt_multiplier') or 0))
         paired.append({'date':day,'scheme_a_nav':float((1+fa.portfolio_return_net).cumprod().iloc[idx]),
                        'scheme_b_nav':float((1+fb.portfolio_return_net).cumprod().iloc[len(paired)]),
                        'scheme_a_return':float(left['portfolio_return_net']),'scheme_b_return':float(right['portfolio_return_net']),
@@ -741,12 +743,22 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
                        'scheme_a_turnover':left.get('turnover'),'scheme_b_turnover':right.get('turnover'),
                        'scheme_a_total_cost':left.get('total_cost'),'scheme_b_total_cost':right.get('total_cost'),
                        'scheme_a_roll_cost':left.get('contract_roll_cost'),'scheme_b_roll_cost':right.get('contract_roll_cost'),
-                       'scheme_a_rebalance_cost':left.get('portfolio_rebalance_cost'),'scheme_b_rebalance_cost':right.get('portfolio_rebalance_cost')})
+                       'scheme_a_rebalance_cost':left.get('portfolio_rebalance_cost'),'scheme_b_rebalance_cost':right.get('portfolio_rebalance_cost'),
+                       'weight_delta':weight_delta,'multiplier_delta':multiplier_delta,
+                       'cost_delta':float((right.get('total_cost') or 0)-(left.get('total_cost') or 0))})
     top=sorted(paired,key=lambda x:abs(x.get('return_delta') or 0),reverse=True)[:20]
+    by_weight=sorted(paired,key=lambda x:x.get('weight_delta') or 0,reverse=True)[:20]
+    by_multiplier=sorted(paired,key=lambda x:x.get('multiplier_delta') or 0,reverse=True)[:20]
+    missing_a=sorted(set(dates)-set(fa.date)); missing_b=sorted(set(dates)-set(fb.date))
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
-            'top_changed_days':top,'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
+            'top_changed_days':top,'top_weight_changed_days':by_weight,
+            'top_multiplier_changed_days':by_multiplier,
+            'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
+                                  'missing_days_a':missing_a,'missing_days_b':missing_b,
+                                  'missing_day_count_a':len(missing_a),'missing_day_count_b':len(missing_b)},
+            'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
 
 
 
