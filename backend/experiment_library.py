@@ -11,7 +11,7 @@ from typing import Any
 import pyarrow.parquet as pq
 
 from .config import ROOT
-from .experiment_runner import REQUIRED_PARQUET_COLUMNS
+from .experiment_runner import parquet_schema_valid
 
 DB_PATH = ROOT / 'experiment_library.sqlite3'
 
@@ -252,10 +252,7 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
             invalid.append(name); continue
         if name.endswith('.parquet'):
             try:
-                parquet=pq.ParquetFile(candidate)
-                required=REQUIRED_PARQUET_COLUMNS[name]
-                invalid_schema=(parquet.metadata is None or parquet.metadata.num_rows <= 0
-                                or not required.issubset(set(parquet.schema.names)))
+                invalid_schema=not parquet_schema_valid(candidate,name)
             except Exception:
                 invalid_schema=True
             if invalid_schema:

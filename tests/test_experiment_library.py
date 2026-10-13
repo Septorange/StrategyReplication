@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,12 +12,22 @@ import pyarrow.parquet as pq
 
 from backend.config import ROOT
 from backend.experiment_library import ExperimentLibrary, resolve_artifact
-from backend.experiment_runner import ExperimentRunner, REQUIRED_PARQUET_COLUMNS
+from backend.experiment_runner import (ExperimentRunner, REQUIRED_PARQUET_COLUMNS,
+                                       PARQUET_BOOLEAN_COLUMNS, PARQUET_STRING_COLUMNS)
 
 
 def _write_test_parquet(path):
     columns=REQUIRED_PARQUET_COLUMNS.get(path.name, {'value'})
-    pq.write_table(pa.table({name: [1] for name in columns}), path)
+    strings=PARQUET_STRING_COLUMNS.get(path.name,set())
+    booleans=PARQUET_BOOLEAN_COLUMNS.get(path.name,set())
+    values={}
+    for name in columns:
+        if name=='date': values[name]=pa.array([datetime(2015,9,30)],type=pa.timestamp('ns'))
+        elif name in strings: values[name]=pa.array(['x'])
+        elif name in booleans: values[name]=pa.array([True])
+        elif name.endswith('_step'): values[name]=pa.array([1],type=pa.int64())
+        else: values[name]=pa.array([1.0],type=pa.float64())
+    pq.write_table(pa.table(values), path)
 
 
 def test_run_evaluation_and_saved_scheme_survive_library_reopen(tmp_path):

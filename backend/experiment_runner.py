@@ -35,6 +35,37 @@ REQUIRED_PARQUET_COLUMNS = {
     'experiment_trade_returns.parquet': {'date','asset','turnover','cost_bps','cost_status','roll_cost',
         'trade_return_gross','trade_return_net'},
 }
+PARQUET_STRING_COLUMNS = {
+    'daily_portfolio.parquet': {'rebalance_type','data_status'},
+    'single_asset_vol_control.parquet': {'asset','control_method','data_status'},
+    'final_daily_weights.parquet': {'asset','monthly_smoothing_state','weight_status','asset_class'},
+    'events.parquet': {'event_type'},
+    'experiment_trade_returns.parquet': {'asset','cost_status'},
+}
+PARQUET_BOOLEAN_COLUMNS = {
+    'single_asset_vol_control.parquet': {'triggered'},
+    'final_daily_weights.parquet': {'midmonth_trigger'},
+}
+
+def parquet_schema_valid(path: Path, name: str) -> bool:
+    parquet=pq.ParquetFile(path)
+    if parquet.metadata is None or parquet.metadata.num_rows <= 0:
+        return False
+    columns={column.name: column for column in parquet.schema}
+    required=REQUIRED_PARQUET_COLUMNS[name]
+    if not required.issubset(columns):
+        return False
+    date_type=str(columns['date'].logical_type)
+    if 'Timestamp' not in date_type and 'Date' not in date_type:
+        return False
+    for column_name in PARQUET_STRING_COLUMNS.get(name,set()):
+        column=columns[column_name]
+        if column.physical_type != 'BYTE_ARRAY' or 'String' not in str(column.logical_type):
+            return False
+    for column_name in PARQUET_BOOLEAN_COLUMNS.get(name,set()):
+        if columns[column_name].physical_type != 'BOOLEAN':
+            return False
+    return True
 
 def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) -> dict:
     """Validate the exact artifact contract before advertising CACHE_HIT/PASS."""
@@ -66,9 +97,7 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
         if name.endswith('.parquet'):
             try:
                 parquet=pq.ParquetFile(path)
-                required=REQUIRED_PARQUET_COLUMNS[name]
-                if (parquet.metadata is None or parquet.metadata.num_rows <= 0
-                        or not required.issubset(set(parquet.schema.names))):
+                if not parquet_schema_valid(path,name):
                     raise ValueError
             except Exception as exc:
                 raise ValueError(f'CACHE_INVALID: stage schema invalid {name}') from exc
