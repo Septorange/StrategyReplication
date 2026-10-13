@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
+import pyarrow.parquet as pq
 
 from .config import ROOT, CACHE, V6_BASE, V6_PYTHON
 from .parameter_registry import unsupported
@@ -46,9 +47,12 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
         if path.is_symlink() or not resolved.is_relative_to(dest.resolve()) or not path.is_file() or path.stat().st_size <= 0:
             raise FileNotFoundError(f'CACHE_INVALID: stage path invalid {name}')
         if name.endswith('.parquet'):
-            with path.open('rb') as stream:
-                if stream.read(4) != b'PAR1' or path.read_bytes()[-4:] != b'PAR1':
-                    raise ValueError(f'CACHE_INVALID: stage schema invalid {name}')
+            try:
+                parquet=pq.ParquetFile(path)
+                if parquet.metadata is None or parquet.metadata.num_rows <= 0 or not parquet.schema.names:
+                    raise ValueError
+            except Exception as exc:
+                raise ValueError(f'CACHE_INVALID: stage schema invalid {name}') from exc
         elif name=='engine_run.json' and not isinstance(json.loads(path.read_text()),dict):
             raise ValueError('CACHE_INVALID: engine metadata schema invalid')
         if hashes.get(name)!=hashlib.sha256(path.read_bytes()).hexdigest():

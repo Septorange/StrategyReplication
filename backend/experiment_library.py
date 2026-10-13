@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import pyarrow.parquet as pq
 
 from .config import ROOT
 
@@ -249,8 +250,12 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
                 or not candidate.is_file() or candidate.stat().st_size <= 0):
             invalid.append(name); continue
         if name.endswith('.parquet'):
-            data=candidate.read_bytes()
-            if data[:4] != b'PAR1' or data[-4:] != b'PAR1':
+            try:
+                parquet=pq.ParquetFile(candidate)
+                invalid_schema=parquet.metadata is None or parquet.metadata.num_rows <= 0 or not parquet.schema.names
+            except Exception:
+                invalid_schema=True
+            if invalid_schema:
                 invalid.append(name)
         elif name=='engine_run.json':
             try:

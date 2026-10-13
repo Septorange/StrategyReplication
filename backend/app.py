@@ -144,6 +144,7 @@ def _safe_source_id(raw: str, index: int) -> str:
 
 def _clean_json(value):
     if isinstance(value,float) and not math.isfinite(value): return None
+    if isinstance(value,str): return _safe_error_message(value)
     if isinstance(value,dict): return {k:_clean_json(v) for k,v in value.items()}
     if isinstance(value,list): return [_clean_json(v) for v in value]
     return value
@@ -474,7 +475,16 @@ def experiment(request: ExperimentRequest):
             pass
         raise HTTPException(422,detail={'code':'EXPERIMENT_INPUT_UNAVAILABLE','message':_safe_error_message(exc),'run_id':failed_id})
     if result.get('status')!='PASS':
-        return result
+        if result.get('status')=='FAIL':
+            failed_hash=result.get('config_hash') or hashlib.sha256(json.dumps(result.get('config',request.model_dump()),sort_keys=True).encode()).hexdigest()
+            failed_id=f'run_failed_{uuid.uuid4().hex}'
+            try:
+                experiment_library.add_run(config_hash=failed_hash,snapshot_id=active_id,status='FAILED',
+                    config=result.get('config',request.model_dump()),artifact_path=ROOT/'experiment_cache'/'.failed',run_id=failed_id)
+            except Exception:
+                pass
+            result['run_id']=failed_id
+        return _public_result(result)
     identity_sha256=result.get('identity_sha256')
     if not isinstance(identity_sha256,str) or len(identity_sha256)!=64:
         raise HTTPException(500,detail={'code':'EXPERIMENT_IDENTITY_MISSING','message':'Real run lacks a full SHA-256 identity.'})
@@ -526,9 +536,7 @@ def _evaluate_result(result: dict, from_date: str, to_date: str):
     metrics=performance(selected.portfolio_return_net)
     selected=selected.copy()
     if 'nav_net' in selected:
-        first_nav=float(selected.nav_net.iloc[0])
-        if math.isfinite(first_nav) and first_nav != 0:
-            selected['nav_net']=selected.nav_net.astype(float)/first_nav
+        selected['nav_net']=(1.0+selected.portfolio_return_net.astype(float)).cumprod()
     if 'nav_gross' in selected:
         first_gross=float(selected.nav_gross.iloc[0])
         if math.isfinite(first_gross) and first_gross != 0:
