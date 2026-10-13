@@ -32,6 +32,48 @@ from .v6_loader import V6Loader
 from .snapshot_registry import FORMAL_ID, get_snapshot, snapshot_entries, PUBLISHED_ROOT
 
 
+def aggregate_class_contributions(ca, cb, da, db):
+    """Aggregate already cost-adjusted asset contributions using recorded classes.
+
+    Missing or inconsistent classifications are reported, never inferred from
+    asset names or silently assigned a zero contribution.
+    """
+    def aggregate(values, weights):
+        classes = {}
+        if 'asset_class' in weights:
+            for row in weights.itertuples():
+                key = (str(row.date), str(row.asset))
+                value = row.asset_class
+                if pd.notna(value) and str(value).strip():
+                    classes.setdefault(key, set()).add(str(value))
+        grouped, missing = {}, 0
+        for key, value in values.items():
+            labels = classes.get(key, set())
+            if len(labels) != 1:
+                missing += 1
+                continue
+            group = (key[0], next(iter(labels)))
+            grouped[group] = grouped.get(group, 0.0) + value
+        return grouped, missing
+    left, missing_a = aggregate(ca, da)
+    right, missing_b = aggregate(cb, db)
+    def rows(a, b, period):
+        return [{period: key[0], 'asset_class': key[1],
+                 'scheme_a_contribution': a.get(key),
+                 'scheme_b_contribution': b.get(key),
+                 'contribution_delta': b[key]-a[key] if key in a and key in b else None}
+                for key in sorted(set(a) | set(b))]
+    annual_a, annual_b = {}, {}
+    for source, target in ((left, annual_a), (right, annual_b)):
+        for (day, label), value in source.items():
+            key = (day[:4], label)
+            target[key] = target.get(key, 0.0) + value
+    missing = missing_a + missing_b
+    if missing:
+        return [], [], missing
+    return rows(left, right, 'date'), rows(annual_a, annual_b, 'year'), missing
+
+
 class SnapshotAnalyticsService(AnalyticsService):
     """Add bundle lineage to API responses without altering frozen analytics calculations."""
     def response(self, rows, method, units, **extra):
@@ -705,6 +747,19 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
         raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':_safe_error_message(exc)})
     fa=pd.DataFrame(ra['history']['rows']); fb=pd.DataFrame(rb['history']['rows'])
     for frame in (fa,fb): frame['date']=pd.to_datetime(frame.date).dt.strftime('%Y-%m-%d')
+    # JSON history is a display projection and can omit execution fields.
+    # Read turnover from the verified stage rather than inventing zero values.
+    for saved, frame in ((a,fa),(b,fb)):
+        payload = _read_parquet_columns(Path(saved['artifact_path'])/'daily_portfolio.parquet', ['date','turnover'])
+        if payload is None:
+            raise HTTPException(409, detail={'code':'COMPARISON_TURNOVER_UNAVAILABLE'})
+        stage = pd.DataFrame(payload)
+        stage['date'] = pd.to_datetime(stage['date']).dt.strftime('%Y-%m-%d')
+        if stage['date'].duplicated().any():
+            raise HTTPException(409, detail={'code':'COMPARISON_TURNOVER_DUPLICATE_DATE'})
+        frame['turnover'] = frame['date'].map(stage.set_index('date')['turnover'])
+        if frame['turnover'].isna().any():
+            raise HTTPException(409, detail={'code':'COMPARISON_TURNOVER_INCOMPLETE'})
     all_a_dates=set(fa.date); all_b_dates=set(fb.date)
     comparison_span=sorted(all_a_dates|all_b_dates)
     dates=sorted(set(fa.date).intersection(fb.date))
@@ -725,7 +780,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     fb=fb[fb.date.isin(dates)].sort_values('date').reset_index(drop=True)
     def asset_decisions(saved):
         try:
-            payload=_read_parquet_columns(Path(saved['artifact_path'])/'final_daily_weights.parquet',['date','asset','final_weight'])
+            payload=_read_parquet_columns(Path(saved['artifact_path'])/'final_daily_weights.parquet',['date','asset','final_weight','asset_class'])
             if payload is None: return pd.DataFrame(columns=['date','asset','final_weight'])
             frame=pd.DataFrame(payload); frame['date']=pd.to_datetime(frame['date']).dt.strftime('%Y-%m-%d')
             return frame[frame.date.isin(dates)]
@@ -827,6 +882,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     annual_contributions=[{'year':k[0],'asset':k[1],'scheme_a_contribution':v[0],
                            'scheme_b_contribution':v[1],'contribution_delta':v[2]}
                           for k,v in annual_contribution_map.items()]
+    class_daily, class_annual, class_missing = aggregate_class_contributions(ca, cb, da, db)
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
@@ -835,6 +891,12 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             'asset_decision_differences':asset_differences,
             'asset_return_contributions':asset_contributions,
             'asset_annual_contributions':annual_contributions,
+            'class_return_contributions':class_daily,
+            'class_annual_contributions':class_annual,
+            'class_contribution_missing_count':class_missing,
+            'class_contribution_status':'AVAILABLE' if class_daily and not class_missing else 'NOT_AVAILABLE',
+            'contribution_method':'ARITHMETIC_NET_CONTRIBUTION_WITH_ABSOLUTE_CONTRIBUTION_REBALANCE_COST_ALLOCATION',
+            'contribution_units':'decimal portfolio return; annual values are arithmetic sums, not compounded returns',
             'asset_contribution_missing_count':sum(x['contribution_delta'] is None for x in asset_contributions),
             'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
                                   'missing_days_a':missing_a,'missing_days_b':missing_b,
