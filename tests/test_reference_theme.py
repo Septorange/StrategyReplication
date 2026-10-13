@@ -11,7 +11,7 @@ def test_reference_layout_and_navigation():
     for x in ['策略复盘','参数实验','决策解释','事件研究','收益归因']:
         assert x in HTML+JS
     assert 'Strategy Lab · V0.7 Research Analytics' in HTML
-    assert 'styles.css?v=0.7.0' in HTML
+    assert 'styles.css?v=0.7.1' in HTML
 
 def test_reference_does_not_reintroduce_synthetic_strategy():
     assert 'window.DEMO_MODE=false' in HTML
