@@ -1,0 +1,9 @@
+{
+  "method": "sha256(path, byte_length, file_sha256) in sorted relative-path order",
+  "v6_frozen_tree": {"root": "资产配置模型复现6", "files": 4688, "digest": "0c6385271ebcc3ed99a906ee8f2f8030099f26f4c05bd2da64b658b397a4eb36"},
+  "formal_web": {"files": 11, "digest": "03e198493055368201c6fdd4ebee4eeda749ad4aecb47eb536199403512f4523"},
+  "formal_analytics": {"files": 17, "digest": "db909daec085f62274d4ec7e933d83bbd72bf6147f8f62fae50b424f93d95605"},
+  "extended_local_bundle": {"files": 18, "digest": "05b569c8df04341bab6340773aa8960c164e4d970bd267d5faee5cd2c9bd94f1"},
+  "captured_at": "2026-10-13",
+  "scope": "read-only baseline before Phase 2.1 remediation"
+}
