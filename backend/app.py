@@ -8,7 +8,6 @@ from contextvars import ContextVar
 from datetime import date
 import uuid
 import pandas as pd
-import pyarrow.parquet as pq
 
 import hashlib
 import json
@@ -17,7 +16,7 @@ import re
 from pathlib import Path
 
 from .config import FRONTEND, DEMO_MODE, ROOT, SNAPSHOT
-from .experiment_runner import ExperimentRunner
+from .experiment_runner import ExperimentRunner, _read_parquet_columns
 from .replay_service import ReplayService
 from .research_service import ResearchService
 from .schemas import (ExperimentRequest, SaveExperimentRequest, EvaluateExperimentRequest,
@@ -726,8 +725,9 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     fb=fb[fb.date.isin(dates)].sort_values('date').reset_index(drop=True)
     def asset_decisions(saved):
         try:
-            table=pq.read_table(Path(saved['artifact_path'])/'final_daily_weights.parquet',columns=['date','asset','final_weight'])
-            frame=table.to_pandas(); frame['date']=pd.to_datetime(frame['date']).dt.strftime('%Y-%m-%d')
+            payload=_read_parquet_columns(Path(saved['artifact_path'])/'final_daily_weights.parquet',['date','asset','final_weight'])
+            if payload is None: return pd.DataFrame(columns=['date','asset','final_weight'])
+            frame=pd.DataFrame(payload); frame['date']=pd.to_datetime(frame['date']).dt.strftime('%Y-%m-%d')
             return frame[frame.date.isin(dates)]
         except (OSError,ValueError,TypeError,KeyError):
             return pd.DataFrame(columns=['date','asset','final_weight'])
