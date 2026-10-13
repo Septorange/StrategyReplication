@@ -785,7 +785,8 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             payload=_read_parquet_columns(Path(saved['artifact_path'])/'experiment_trade_returns.parquet',['date','asset','trade_return_net'])
             if payload is None: return pd.DataFrame(columns=['date','asset','trade_return_net'])
             frame=pd.DataFrame(payload); frame['date']=pd.to_datetime(frame['date']).dt.strftime('%Y-%m-%d')
-            frame['trade_return_net']=pd.to_numeric(frame['trade_return_net'],errors='coerce').fillna(0.0)
+            frame['trade_return_net']=pd.to_numeric(frame['trade_return_net'],errors='coerce')
+            frame=frame.dropna(subset=['trade_return_net'])
             return frame[frame.date.isin(dates)]
         except (OSError,ValueError,TypeError,KeyError):
             return pd.DataFrame(columns=['date','asset','trade_return_net'])
@@ -815,7 +816,17 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
                                  'return_delta':(cb[k]-ca[k]) if k in ca and k in cb else None}
                                 for k in contribution_keys),
                                key=lambda x:abs(x['contribution_delta']) if x['contribution_delta'] is not None else -1,
-                               reverse=True)[:100]
+                               reverse=True)
+    annual_contribution_map={}
+    for key in set(ca)&set(cb):
+        year_asset=(key[0][:4],key[1])
+        annual_contribution_map.setdefault(year_asset,[0.0,0.0,0.0])
+        annual_contribution_map[year_asset][0]+=ca[key]
+        annual_contribution_map[year_asset][1]+=cb[key]
+        annual_contribution_map[year_asset][2]+=cb[key]-ca[key]
+    annual_contributions=[{'year':k[0],'asset':k[1],'scheme_a_contribution':v[0],
+                           'scheme_b_contribution':v[1],'contribution_delta':v[2]}
+                          for k,v in annual_contribution_map.items()]
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
@@ -823,6 +834,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             'top_multiplier_changed_days':by_multiplier,
             'asset_decision_differences':asset_differences,
             'asset_return_contributions':asset_contributions,
+            'asset_annual_contributions':annual_contributions,
             'asset_contribution_missing_count':sum(x['contribution_delta'] is None for x in asset_contributions),
             'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
                                   'missing_days_a':missing_a,'missing_days_b':missing_b,
