@@ -734,6 +734,11 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     da,db=asset_decisions(a),asset_decisions(b)
     ma,mb=performance(fa.portfolio_return_net),performance(fb.portfolio_return_net)
     for metrics,frame in ((ma,fa),(mb,fb)):
+        if 'final_10vt_multiplier' in frame:
+            vt=pd.to_numeric(frame['final_10vt_multiplier'],errors='coerce').dropna()
+            if not vt.empty:
+                metrics['lower_bound_hit_rate']=float((vt<=0.5+1e-12).mean())
+                metrics['upper_bound_hit_rate']=float((vt>=1.5-1e-12).mean())
         for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost'):
             if col in frame: metrics[col]=float(frame[col].fillna(0).sum())
     for metrics,source in ((ma,ra.get('exposure',{}).get('rows',[])),(mb,rb.get('exposure',{}).get('rows',[]))):
@@ -784,6 +789,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
                                   'missing_days_a':missing_a,'missing_days_b':missing_b,
                                   'missing_day_count_a':len(missing_a),'missing_day_count_b':len(missing_b)},
+            'asset_contribution_status':'UNAVAILABLE_FROM_CACHED_STAGE' if not asset_differences else 'FINAL_WEIGHT_DECISION_DIFFS',
             'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
 
 
