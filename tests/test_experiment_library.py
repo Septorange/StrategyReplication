@@ -13,7 +13,8 @@ import pyarrow.parquet as pq
 from backend.config import ROOT
 from backend.experiment_library import ExperimentLibrary, resolve_artifact
 from backend.experiment_runner import (ExperimentRunner, REQUIRED_PARQUET_COLUMNS,
-                                       PARQUET_BOOLEAN_COLUMNS, PARQUET_STRING_COLUMNS)
+                                       PARQUET_BOOLEAN_COLUMNS, PARQUET_STRING_COLUMNS,
+                                       parquet_date_coverage_valid)
 
 
 def _write_test_parquet(path):
@@ -28,6 +29,15 @@ def _write_test_parquet(path):
         elif name.endswith('_step'): values[name]=pa.array([1],type=pa.int64())
         else: values[name]=pa.array([1.0],type=pa.float64())
     pq.write_table(pa.table(values), path)
+
+
+def test_parquet_date_coverage_rejects_duplicate_daily_dates(tmp_path):
+    path=tmp_path/'daily_portfolio.parquet'
+    values={name: [1.0, 1.0] for name in REQUIRED_PARQUET_COLUMNS[path.name]}
+    values['date']=pa.array([datetime(2015,9,30),datetime(2015,9,30)],type=pa.timestamp('ns'))
+    for name in PARQUET_STRING_COLUMNS[path.name]: values[name]=pa.array(['x','x'])
+    pq.write_table(pa.table(values),path)
+    assert not parquet_date_coverage_valid(path,path.name,{'2015-09-30','2015-10-08'})
 
 
 def test_run_evaluation_and_saved_scheme_survive_library_reopen(tmp_path):

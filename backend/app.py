@@ -739,7 +739,9 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
                        'scheme_a_bond':xa.get('bond'),'scheme_b_bond':xb.get('bond'),
                        'scheme_a_commodity':xa.get('commodity'),'scheme_b_commodity':xb.get('commodity'),
                        'scheme_a_turnover':left.get('turnover'),'scheme_b_turnover':right.get('turnover'),
-                       'scheme_a_total_cost':left.get('total_cost'),'scheme_b_total_cost':right.get('total_cost')})
+                       'scheme_a_total_cost':left.get('total_cost'),'scheme_b_total_cost':right.get('total_cost'),
+                       'scheme_a_roll_cost':left.get('contract_roll_cost'),'scheme_b_roll_cost':right.get('contract_roll_cost'),
+                       'scheme_a_rebalance_cost':left.get('portfolio_rebalance_cost'),'scheme_b_rebalance_cost':right.get('portfolio_rebalance_cost')})
     top=sorted(paired,key=lambda x:abs(x.get('return_delta') or 0),reverse=True)[:20]
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},

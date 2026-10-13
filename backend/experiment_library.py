@@ -11,7 +11,8 @@ from typing import Any
 import pyarrow.parquet as pq
 
 from .config import ROOT
-from .experiment_runner import parquet_rows_valid, parquet_schema_valid, result_history_rows
+from .experiment_runner import (parquet_date_coverage_valid, parquet_rows_valid,
+                                 parquet_schema_valid, result_history_dates, result_history_rows)
 
 DB_PATH = ROOT / 'experiment_library.sqlite3'
 
@@ -225,6 +226,7 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
     expected_rows=result_history_rows(result)
     if expected_rows == -1:
         raise ValueError('Saved artifact history and baseline observations disagree.')
+    expected_dates=result_history_dates(result)
     result_sha256=hashlib.sha256(result_path.read_bytes()).hexdigest()
     if (manifest.get('result_sha256')!=result_sha256
             or manifest.get('identity_sha256')!=identity
@@ -256,7 +258,8 @@ def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:
         if name.endswith('.parquet'):
             try:
                 invalid_schema=(not parquet_schema_valid(candidate,name)
-                                or not parquet_rows_valid(candidate,name,expected_rows))
+                                or not parquet_rows_valid(candidate,name,expected_rows)
+                                or not parquet_date_coverage_valid(candidate,name,expected_dates))
             except Exception:
                 invalid_schema=True
             if invalid_schema:
