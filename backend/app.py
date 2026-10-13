@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from contextvars import ContextVar
 from datetime import date
 import uuid
 import pandas as pd
+import pyarrow.parquet as pq
 
 import hashlib
 import json
@@ -153,6 +155,12 @@ def _safe_error_message(value: object) -> str:
     """Keep diagnostics useful without returning server filesystem paths."""
     text=str(value)
     return re.sub(r'/(?:Users|private|home)/[^\s\"\'<>]+', '[redacted-path]', text)
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_response(request: Request, exc: RequestValidationError):
+    # FastAPI's default 422 serializer includes the submitted value verbatim;
+    # recursively sanitize it before exposing validation diagnostics.
+    return JSONResponse(status_code=422, content={'detail': _clean_json(exc.errors())})
 
 def _public_result(result: dict, *, evaluation: dict|None=None) -> dict:
     """Strip server paths and reduce internal stage provenance to safe IDs."""
@@ -698,6 +706,8 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
         raise HTTPException(409,detail={'code':'SAVED_SCHEME_ARTIFACT_UNAVAILABLE','message':_safe_error_message(exc)})
     fa=pd.DataFrame(ra['history']['rows']); fb=pd.DataFrame(rb['history']['rows'])
     for frame in (fa,fb): frame['date']=pd.to_datetime(frame.date).dt.strftime('%Y-%m-%d')
+    all_a_dates=set(fa.date); all_b_dates=set(fb.date)
+    comparison_span=sorted(all_a_dates|all_b_dates)
     dates=sorted(set(fa.date).intersection(fb.date))
     if not dates:
         raise HTTPException(422,detail={'code':'NO_COMMON_OBSERVATIONS'})
@@ -714,6 +724,14 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     dates=[d for d in dates if start<=d<=end]
     fa=fa[fa.date.isin(dates)].sort_values('date').reset_index(drop=True)
     fb=fb[fb.date.isin(dates)].sort_values('date').reset_index(drop=True)
+    def asset_decisions(saved):
+        try:
+            table=pq.read_table(Path(saved['artifact_path'])/'final_daily_weights.parquet',columns=['date','asset','final_weight'])
+            frame=table.to_pandas(); frame['date']=pd.to_datetime(frame['date']).dt.strftime('%Y-%m-%d')
+            return frame[frame.date.isin(dates)]
+        except (OSError,ValueError,TypeError,KeyError):
+            return pd.DataFrame(columns=['date','asset','final_weight'])
+    da,db=asset_decisions(a),asset_decisions(b)
     ma,mb=performance(fa.portfolio_return_net),performance(fb.portfolio_return_net)
     for metrics,frame in ((ma,fa),(mb,fb)):
         for col in ('total_cost','contract_roll_cost','portfolio_rebalance_cost'):
@@ -749,12 +767,20 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     top=sorted(paired,key=lambda x:abs(x.get('return_delta') or 0),reverse=True)[:20]
     by_weight=sorted(paired,key=lambda x:x.get('weight_delta') or 0,reverse=True)[:20]
     by_multiplier=sorted(paired,key=lambda x:x.get('multiplier_delta') or 0,reverse=True)[:20]
-    missing_a=sorted(set(dates)-set(fa.date)); missing_b=sorted(set(dates)-set(fb.date))
+    missing_a=sorted(set(comparison_span)-all_a_dates); missing_b=sorted(set(comparison_span)-all_b_dates)
+    asset_a={(str(r.date),str(r.asset)) : float(r.final_weight) for r in da.itertuples()}
+    asset_b={(str(r.date),str(r.asset)) : float(r.final_weight) for r in db.itertuples()}
+    asset_differences=sorted(({'date':k[0],'asset':k[1],'scheme_a_weight':asset_a.get(k),
+                               'scheme_b_weight':asset_b.get(k),
+                               'weight_delta':(asset_b.get(k,0)-asset_a.get(k,0))}
+                              for k in set(asset_a)|set(asset_b)),
+                             key=lambda x:abs(x['weight_delta'] or 0),reverse=True)[:50]
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
             'top_changed_days':top,'top_weight_changed_days':by_weight,
             'top_multiplier_changed_days':by_multiplier,
+            'asset_decision_differences':asset_differences,
             'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
                                   'missing_days_a':missing_a,'missing_days_b':missing_b,
                                   'missing_day_count_a':len(missing_a),'missing_day_count_b':len(missing_b)},
