@@ -10,14 +10,17 @@ import pandas as pd
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 from .config import FRONTEND, DEMO_MODE, ROOT, SNAPSHOT
 from .experiment_runner import ExperimentRunner
 from .replay_service import ReplayService
 from .research_service import ResearchService
-from .schemas import ExperimentRequest, SaveExperimentRequest, EvaluateExperimentRequest, CompareExperimentsRequest
+from .schemas import (ExperimentRequest, SaveExperimentRequest, EvaluateExperimentRequest,
+                      CompareExperimentsRequest, CompareCheckRequest, SavedExperimentPatch)
 from .experiment_library import ExperimentLibrary, resolve_artifact
+from .experiment_runner import validate_cache_artifact
 from .analytics_service import performance
 from .analytics_service import AnalyticsService
 from .analytics_schemas import (HistoryResponse, PerformanceResponse, WinRateResponse, ClassContributionResponse, AssetContributionResponse, ExposureResponse, DrawdownResponse)
@@ -132,6 +135,51 @@ def require_service(service, code='FORMAL_DATA_UNAVAILABLE'):
     if service is None:
         raise HTTPException(status_code=503, detail={'code': code, 'message': 'Required real snapshot data is unavailable.'})
     return service
+
+def _safe_source_id(raw: str, index: int) -> str:
+    """Expose a stable non-path source label in public JSON."""
+    name=Path(str(raw)).name
+    return name if name and name not in ('.','..') else f'source_{index}'
+
+def _clean_json(value):
+    if isinstance(value,float) and not math.isfinite(value): return None
+    if isinstance(value,dict): return {k:_clean_json(v) for k,v in value.items()}
+    if isinstance(value,list): return [_clean_json(v) for v in value]
+    return value
+
+def _public_result(result: dict, *, evaluation: dict|None=None) -> dict:
+    """Strip server paths and reduce internal stage provenance to safe IDs."""
+    out=_clean_json(json.loads(json.dumps(result, ensure_ascii=False, default=str)))
+    for key in ('artifact_path','output_path','request_path','input_path','cwd'):
+        out.pop(key,None)
+    hashes=out.get('source_hashes')
+    if isinstance(hashes,dict):
+        out['source_hashes']=[{'source_id':_safe_source_id(k,i),'sha256':v} for i,(k,v) in enumerate(sorted(hashes.items()))]
+    stages=out.get('stages')
+    if isinstance(stages,list):
+        for stage in stages:
+            if isinstance(stage,dict):
+                if 'artifact' in stage: stage['artifact']=Path(str(stage['artifact'])).name
+                if isinstance(stage.get('artifacts'),list): stage['artifacts']=[Path(str(x)).name for x in stage['artifacts']]
+    if evaluation is not None:
+        out['evaluation']=evaluation
+    return out
+
+def _public_saved(item: dict) -> dict:
+    out={k:v for k,v in item.items() if k not in ('artifact_path',)}
+    return out
+
+def _compatibility(a: dict, b: dict) -> dict:
+    reasons=[]
+    if a.get('snapshot_id') != b.get('snapshot_id'):
+        reasons.append('不同数据快照，基础输入和合约映射未经逐项证明，不可直接归因于参数。')
+        return {'status':'NOT_COMPARABLE','reasons':reasons,'warnings':reasons,
+                'snapshot_a':a.get('snapshot_id'),'snapshot_b':b.get('snapshot_id')}
+    if a.get('status') != 'PASS' or b.get('status') != 'PASS':
+        reasons.append('至少一个保存方案不是完整认证产物。')
+        return {'status':'NOT_COMPARABLE','reasons':reasons,'warnings':[]}
+    return {'status':'COMPARABLE','reasons':[],'warnings':[],
+            'snapshot_id':a.get('snapshot_id'),'engine_semantics':'V6_PHASE3B_ADAPTER_V4'}
 
 
 def _snapshot_file_status(path: Path):
@@ -411,8 +459,14 @@ def experiment(request: ExperimentRequest):
     active_loader=require_service(loader)
     try:
         result=require_service(experiments).run(request,snapshot_id=active_id,baseline=active_loader.summary)
-    except (OSError,ValueError,KeyError) as exc:
-        raise HTTPException(422,detail={'code':'EXPERIMENT_INPUT_UNAVAILABLE','message':str(exc)})
+    except (OSError,ValueError,KeyError,RuntimeError) as exc:
+        failed_id=f'run_failed_{uuid.uuid4().hex}'
+        try:
+            experiment_library.add_run(config_hash=f'failed_{uuid.uuid4().hex}',snapshot_id=active_id,
+                status='FAILED',config=request.model_dump(),artifact_path=ROOT/'experiment_cache'/'.failed',run_id=failed_id)
+        except Exception:
+            pass
+        raise HTTPException(422,detail={'code':'EXPERIMENT_INPUT_UNAVAILABLE','message':str(exc),'run_id':failed_id})
     if result.get('status')!='PASS':
         return result
     identity_sha256=result.get('identity_sha256')
@@ -433,7 +487,7 @@ def experiment(request: ExperimentRequest):
     experiment_library.add_evaluation(run_id=run_id,snapshot_id=active_id,from_date=start,to_date=end,
         metrics=result['experiment'],evaluation_id=evaluation_id)
     result.update(run_id=run_id,evaluation_id=evaluation_id,evaluation=evaluation)
-    return result
+    return _public_result(result)
 
 
 def _run_artifact(run_id: str):
@@ -508,12 +562,38 @@ def save_experiment(request: SaveExperimentRequest):
     if not evaluation:
         raise HTTPException(404,detail={'code':'EXPERIMENT_EVALUATION_NOT_FOUND','evaluation_id':request.evaluation_id})
     return experiment_library.save(run_id=request.run_id,evaluation_id=request.evaluation_id,
-                                   name=request.name,notes=request.notes)
+                                   name=request.name,notes=request.notes,tags=request.tags)
 
 
 @app.get('/api/experiment/saved')
 def list_saved_experiments():
-    return {'saved':experiment_library.list_saved()}
+    return {'saved':[_public_saved(x) for x in experiment_library.list_saved()]}
+
+@app.get('/api/experiments')
+def list_experiments(q: str|None=None, snapshot_id: str|None=None, status: str|None=None,
+                     page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=200)):
+    rows=experiment_library.list_saved()
+    if q: rows=[x for x in rows if q.lower() in (x.get('name','')+' '+x.get('notes','')+' '+' '.join(x.get('tags',[]))).lower()]
+    if snapshot_id: rows=[x for x in rows if x.get('snapshot_id')==snapshot_id]
+    if status: rows=[x for x in rows if x.get('status')==status]
+    total=len(rows); start=(page-1)*page_size
+    return {'items':[_public_saved(x) for x in rows[start:start+page_size]],'page':page,'page_size':page_size,'total':total}
+
+@app.get('/api/experiments/runs/{run_id}')
+def get_experiment_run(run_id: str):
+    run=experiment_library.get_run(run_id)
+    if not run: raise HTTPException(404,detail={'code':'EXPERIMENT_RUN_NOT_FOUND','run_id':run_id})
+    try: validate_cache_artifact(Path(run['artifact_path']),run['config_hash'],run['snapshot_id'])
+    except Exception as exc:
+        run['status']='CACHE_INVALID'; run['error_code']='ARTIFACT_UNAVAILABLE'; run['error_summary']=str(exc)[:300]
+    run.pop('artifact_path',None)
+    return run
+
+@app.get('/api/experiments/runs/{run_id}/series')
+def get_experiment_series(run_id: str):
+    run,result=_run_artifact(run_id)
+    return {'run_id':run_id,'snapshot_id':run['snapshot_id'],'history':result.get('history',{}),
+            'exposure':result.get('exposure',{}),'costs':result.get('costs',{})}
 
 
 @app.get('/api/experiment/saved/{scheme_id}')
@@ -528,11 +608,41 @@ def open_saved_experiment(scheme_id: str):
     rows=result.get('history',{}).get('rows',[])
     available_from=min((str(x['date'])[:10] for x in rows),default=saved['from_date'])
     available_to=max((str(x['date'])[:10] for x in rows),default=saved['to_date'])
+    evaluation=_evaluate_result(result,saved['from_date'],saved['to_date'])
+    # The saved evaluation is the default view. Keep the full trajectory only
+    # behind an explicit, clearly named field for diagnostics.
+    full_history=result.get('history',{})
+    result['run_full_history']=full_history
+    result['history']={'rows':evaluation['rows']}
+    result['experiment']=evaluation['metrics']
     result.update(run_id=saved['run_id'],evaluation_id=saved['evaluation_id'],
                   evaluation={'from_date':saved['from_date'],'to_date':saved['to_date'],
                               'available_from':available_from,'available_to':available_to,
-                              'metrics':saved['metrics']})
-    return {'saved':{k:v for k,v in saved.items() if k!='artifact_path'},'result':result}
+                              'metrics':evaluation['metrics'],'observations':len(evaluation['rows'])})
+    return {'saved':_public_saved(saved),'result':_public_result(result)}
+
+@app.patch('/api/experiments/saved/{scheme_id}')
+def patch_saved_experiment(scheme_id: str, request: SavedExperimentPatch):
+    if not experiment_library.get_saved(scheme_id): raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND','scheme_id':scheme_id})
+    tags=request.tags
+    if tags is not None and any(not isinstance(x,str) or len(x)>40 for x in tags):
+        raise HTTPException(422,detail={'code':'INVALID_TAGS'})
+    item=experiment_library.update_saved(scheme_id,name=request.name,notes=request.notes,tags=tags)
+    return {'saved':_public_saved(item)}
+
+@app.delete('/api/experiments/saved/{scheme_id}')
+def delete_saved_experiment(scheme_id: str):
+    if not experiment_library.delete_saved(scheme_id): raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND','scheme_id':scheme_id})
+    return {'deleted':True,'scheme_id':scheme_id}
+
+@app.post('/api/experiment/compare/check')
+def check_saved_comparison(request: CompareCheckRequest):
+    a,b=experiment_library.get_saved(request.scheme_a),experiment_library.get_saved(request.scheme_b)
+    if not a or not b: raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND'})
+    try: resolve_artifact(experiment_library,a); resolve_artifact(experiment_library,b)
+    except (OSError,ValueError,json.JSONDecodeError) as exc:
+        return {'status':'NOT_COMPARABLE','reasons':[str(exc)],'warnings':[]}
+    return _compatibility(a,b)
 
 
 @app.post('/api/experiment/compare')
@@ -540,6 +650,9 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
     a,b=experiment_library.get_saved(request.scheme_a),experiment_library.get_saved(request.scheme_b)
     if not a or not b:
         raise HTTPException(404,detail={'code':'SAVED_SCHEME_NOT_FOUND','scheme_ids':[request.scheme_a,request.scheme_b]})
+    compatibility=_compatibility(a,b)
+    if compatibility['status']!='COMPARABLE':
+        raise HTTPException(409,detail={**compatibility,'code':'NOT_COMPARABLE'})
     try:
         ra,rb=resolve_artifact(experiment_library,a),resolve_artifact(experiment_library,b)
     except (OSError,ValueError,json.JSONDecodeError) as exc:
@@ -588,7 +701,10 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
 @app.get('/api/experiment/parameters')
 def experiment_parameters():
     require_service(loader)
-    return parameter_capabilities()
+    caps=parameter_capabilities()
+    caps.pop('engine',None)
+    caps['engine_id']='V6_PHASE3B_FROZEN_ADAPTER_V4'
+    return caps
 
 @app.get('/api/strategy/{version}/analytics/history', response_model=HistoryResponse, response_model_exclude_none=False)
 def analytics_history(version: str, from_date: str|None=Query(None,alias='from'), to_date: str|None=Query(None,alias='to'), display_window: int=Query(120,ge=2,le=504)):

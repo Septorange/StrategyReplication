@@ -14,6 +14,37 @@ from .config import ROOT, CACHE, V6_BASE, V6_PYTHON
 from .parameter_registry import unsupported
 from .snapshot_registry import FORMAL_ID, get_snapshot
 
+REQUIRED_ARTIFACTS = ('daily_portfolio.parquet','single_asset_vol_control.parquet',
+                      'final_daily_weights.parquet','events.parquet',
+                      'experiment_trade_returns.parquet','engine_run.json')
+
+def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) -> dict:
+    """Validate the exact artifact contract before advertising CACHE_HIT/PASS."""
+    if not dest.is_dir(): raise FileNotFoundError('CACHE_INVALID: artifact directory missing')
+    result_path, manifest_path = dest/'result.json', dest/'artifact_manifest.json'
+    if not result_path.is_file() or not manifest_path.is_file():
+        raise FileNotFoundError('CACHE_INVALID: result or manifest missing')
+    result=json.loads(result_path.read_text()); manifest=json.loads(manifest_path.read_text())
+    if result.get('status')!='PASS' or result.get('synthetic') is not False:
+        raise ValueError('CACHE_INVALID: result is not a completed real run')
+    if (result.get('identity_sha256')!=identity_sha256 or result.get('config_hash')!=identity_sha256
+            or result.get('snapshot_id')!=snapshot_id or result.get('cache_key')!=identity_sha256[:16]
+            or result.get('adapter_version')!=4):
+        raise ValueError('CACHE_INVALID: result identity mismatch')
+    if (manifest.get('identity_sha256')!=identity_sha256 or manifest.get('config_hash')!=identity_sha256
+            or manifest.get('snapshot_id')!=snapshot_id or manifest.get('cache_key')!=identity_sha256[:16]
+            or manifest.get('adapter_version')!=4
+            or manifest.get('result_sha256')!=hashlib.sha256(result_path.read_bytes()).hexdigest()):
+        raise ValueError('CACHE_INVALID: manifest identity or result digest mismatch')
+    hashes=manifest.get('artifact_sha256')
+    if not isinstance(hashes,dict): raise ValueError('CACHE_INVALID: stage digests missing')
+    for name in REQUIRED_ARTIFACTS:
+        path=dest/name
+        if not path.is_file(): raise FileNotFoundError(f'CACHE_INVALID: stage missing {name}')
+        if hashes.get(name)!=hashlib.sha256(path.read_bytes()).hexdigest():
+            raise ValueError(f'CACHE_INVALID: stage digest mismatch {name}')
+    return result
+
 
 class ExperimentRunner:
     def __init__(self, baseline):
@@ -97,23 +128,10 @@ class ExperimentRunner:
             fcntl.flock(alias_lock.fileno(),fcntl.LOCK_EX)
             fcntl.flock(lock_file.fileno(),fcntl.LOCK_EX)
             try:
+                if dest.exists() and not result_path.exists():
+                    raise FileNotFoundError('CACHE_INVALID: cache alias exists without result')
                 if result_path.exists():
-                    cached=json.loads(result_path.read_text())
-                    manifest_path=dest/'artifact_manifest.json'
-                    manifest=json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
-                    if (cached.get('identity_sha256')==identity_sha256
-                            and cached.get('snapshot_id')==snapshot_id
-                            and cached.get('config_hash')==identity_sha256
-                            and cached.get('cache_key')==key
-                            and cached.get('adapter_version')==4
-                            and manifest.get('identity_sha256')==identity_sha256
-                            and manifest.get('config_hash')==identity_sha256
-                            and manifest.get('snapshot_id')==snapshot_id
-                            and manifest.get('cache_key')==key
-                            and manifest.get('adapter_version')==4
-                            and manifest.get('result_sha256')==hashlib.sha256(result_path.read_bytes()).hexdigest()):
-                        return cached
-                    raise RuntimeError(f'Experiment cache alias collision or stale identity for {key}; refusing to reuse it.')
+                    return validate_cache_artifact(dest, identity_sha256, snapshot_id)
                 return self._execute(identity_sha256,key,dest,config,baseline,snapshot_id,inputs,hashes)
             finally:
                 fcntl.flock(lock_file.fileno(),fcntl.LOCK_UN)

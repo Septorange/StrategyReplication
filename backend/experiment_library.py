@@ -69,6 +69,10 @@ class ExperimentLibrary:
                 CREATE INDEX IF NOT EXISTS idx_saved_created ON saved_experiments(created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_eval_run ON experiment_evaluations(run_id, created_at DESC);
             ''')
+            cols={row[1] for row in db.execute('PRAGMA table_info(saved_experiments)')}
+            if 'tags_json' not in cols: db.execute("ALTER TABLE saved_experiments ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'")
+            if 'updated_at' not in cols: db.execute("ALTER TABLE saved_experiments ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+            if 'deleted_at' not in cols: db.execute("ALTER TABLE saved_experiments ADD COLUMN deleted_at TEXT")
 
     def add_run(self, *, config_hash: str, snapshot_id: str, status: str, config: dict,
                 artifact_path: Path, run_id: str | None = None) -> str:
@@ -103,15 +107,20 @@ class ExperimentLibrary:
                 raise ValueError(f'Evaluation identity collision or conflicting metadata for {evaluation_id}.')
         return evaluation_id
 
-    def save(self, *, run_id: str, evaluation_id: str, name: str, notes: str = '',
+    def save(self, *, run_id: str, evaluation_id: str, name: str, notes: str = '', tags: list[str] | None = None,
              scheme_id: str | None = None) -> dict[str, Any]:
         scheme_id = scheme_id or f'scheme_{uuid.uuid4().hex}'
         created_at = _now()
+        tags=tags or []
         with self._connect() as db:
-            db.execute('INSERT INTO saved_experiments VALUES (?,?,?,?,?,?)',
-                       (scheme_id, run_id, evaluation_id, name.strip(), notes.strip(), created_at))
+            db.execute('''INSERT INTO saved_experiments
+                (scheme_id,run_id,evaluation_id,name,notes,created_at,tags_json,updated_at)
+                VALUES (?,?,?,?,?,?,?,?)''',
+                       (scheme_id, run_id, evaluation_id, name.strip(), notes.strip(), created_at,
+                        json.dumps(tags,ensure_ascii=False),created_at))
         return {'scheme_id': scheme_id, 'run_id': run_id, 'evaluation_id': evaluation_id,
-                'name': name.strip(), 'notes': notes.strip(), 'created_at': created_at}
+                'name': name.strip(), 'notes': notes.strip(), 'tags': tags,
+                'created_at': created_at, 'updated_at': created_at}
 
     def list_saved(self) -> list[dict[str, Any]]:
         with self._connect() as db:
@@ -120,6 +129,7 @@ class ExperimentLibrary:
                                   FROM saved_experiments s
                                   JOIN experiment_runs r USING(run_id)
                                   JOIN experiment_evaluations e USING(evaluation_id)
+                                 WHERE s.deleted_at IS NULL
                                  ORDER BY s.created_at DESC''').fetchall()
         items=[]
         for row in rows:
@@ -149,7 +159,7 @@ class ExperimentLibrary:
                                   FROM saved_experiments s
                                   JOIN experiment_runs r USING(run_id)
                                   JOIN experiment_evaluations e USING(evaluation_id)
-                                 WHERE s.scheme_id=?''', (scheme_id,)).fetchone()
+                                 WHERE s.scheme_id=? AND s.deleted_at IS NULL''', (scheme_id,)).fetchone()
         if not row:
             return None
         result = self._saved_row(row)
@@ -162,7 +172,26 @@ class ExperimentLibrary:
         for source, target in [('config_json', 'config'), ('metrics_json', 'metrics')]:
             if source in result:
                 result[target] = json.loads(result.pop(source))
+        result['tags']=json.loads(result.pop('tags_json','[]') or '[]')
         return result
+
+    def update_saved(self, scheme_id: str, *, name: str|None=None, notes: str|None=None,
+                     tags: list[str]|None=None) -> dict[str, Any] | None:
+        now=_now()
+        fields=[]; values=[]
+        if name is not None: fields.append('name=?'); values.append(name.strip())
+        if notes is not None: fields.append('notes=?'); values.append(notes.strip())
+        if tags is not None: fields.append('tags_json=?'); values.append(json.dumps(tags,ensure_ascii=False))
+        if not fields: return self.get_saved(scheme_id)
+        fields.append('updated_at=?'); values.append(now); values.append(scheme_id)
+        with self._connect() as db:
+            db.execute(f"UPDATE saved_experiments SET {', '.join(fields)} WHERE scheme_id=? AND deleted_at IS NULL",values)
+        return self.get_saved(scheme_id)
+
+    def delete_saved(self, scheme_id: str) -> bool:
+        with self._connect() as db:
+            cur=db.execute('UPDATE saved_experiments SET deleted_at=?, updated_at=? WHERE scheme_id=? AND deleted_at IS NULL',(_now(),_now(),scheme_id))
+        return cur.rowcount > 0
 
 
 def resolve_artifact(library: ExperimentLibrary, saved: dict) -> dict[str, Any]:

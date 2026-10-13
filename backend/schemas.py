@@ -20,6 +20,7 @@ class SaveExperimentRequest(BaseModel):
     evaluation_id: str
     name: str=Field(min_length=1,max_length=100)
     notes: str=Field(default='',max_length=2000)
+    tags: list[str]=Field(default_factory=list, max_length=12)
 
 class EvaluateExperimentRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -33,3 +34,15 @@ class CompareExperimentsRequest(BaseModel):
     scheme_b: str
     evaluation_start: str|None=None
     evaluation_end: str|None=None
+    confirmation_token: str|None=None
+
+class CompareCheckRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    scheme_a: str
+    scheme_b: str
+
+class SavedExperimentPatch(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    name: str|None=Field(default=None,min_length=1,max_length=100)
+    notes: str|None=Field(default=None,max_length=2000)
+    tags: list[str]|None=Field(default=None,max_length=12)
