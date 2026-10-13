@@ -137,3 +137,22 @@ def test_same_run_is_locked_and_atomically_published_once(tmp_path, monkeypatch)
     assert calls == [first['identity_sha256']]
     assert Path(first['artifact_path'], 'result.json').is_file()
     assert not list(cache.glob('.????????????????.*'))
+
+def test_cache_hit_rejects_missing_stage_files(tmp_path, monkeypatch):
+    import backend.experiment_runner as runner_module
+    cache=tmp_path/'experiment_cache'; monkeypatch.setattr(runner_module,'CACHE',cache)
+    calls=[]
+    def fake_run(command, **kwargs):
+        request=json.loads(Path(command[-2]).read_text()); output=Path(command[-1]); calls.append(1)
+        (output/'result.json').write_text(json.dumps({'status':'PASS','synthetic':False,'config':request['config'],'baseline':request['baseline'],'snapshot_id':request['snapshot_id'],'config_hash':request['identity_sha256'],'identity_sha256':request['identity_sha256'],'cache_key':request['cache_key'],'adapter_version':4}))
+        for name in ('daily_portfolio.parquet','single_asset_vol_control.parquet','final_daily_weights.parquet','events.parquet','experiment_trade_returns.parquet'): (output/name).touch()
+        return SimpleNamespace(returncode=0,stdout='',stderr='')
+    monkeypatch.setattr(runner_module.subprocess,'run',fake_run)
+    baseline=json.loads((ROOT/'data/v6_web/summary.json').read_text())
+    class Request:
+        def model_dump(self): return {'target_vol':.12,'vt_window':120,'haircut':.5,'quantile':.9,'midmonth_threshold':.2,'commodity_cost_bps':5,'momentum_excluded_count':1,'risk_budget_vol_window':240,'asset_short_vol_window':20,'short_vol_windows':[20,60],'asset_long_vol_window':240,'quantile_lookback':240}
+    runner=ExperimentRunner(baseline); first=runner.run(Request(),baseline=baseline)
+    (Path(first['artifact_path'])/'events.parquet').unlink()
+    with pytest.raises(FileNotFoundError,match='CACHE_INVALID'):
+        runner.run(Request(),baseline=baseline)
+    assert len(calls)==1

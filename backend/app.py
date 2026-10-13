@@ -570,10 +570,11 @@ def list_saved_experiments():
     return {'saved':[_public_saved(x) for x in experiment_library.list_saved()]}
 
 @app.get('/api/experiments')
-def list_experiments(q: str|None=None, snapshot_id: str|None=None, status: str|None=None,
+def list_experiments(q: str|None=None, tag: str|None=None, snapshot_id: str|None=None, status: str|None=None,
                      page: int=Query(1,ge=1), page_size: int=Query(50,ge=1,le=200)):
     rows=experiment_library.list_saved()
     if q: rows=[x for x in rows if q.lower() in (x.get('name','')+' '+x.get('notes','')+' '+' '.join(x.get('tags',[]))).lower()]
+    if tag: rows=[x for x in rows if tag in x.get('tags',[])]
     if snapshot_id: rows=[x for x in rows if x.get('snapshot_id')==snapshot_id]
     if status: rows=[x for x in rows if x.get('status')==status]
     total=len(rows); start=(page-1)*page_size
@@ -687,14 +688,25 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             for col in ('equity','bond','commodity'):
                 if col in exposure: metrics['avg_'+col+'_exposure']=float(exposure[col].mean())
     paired=[]
+    ea={str(x.get('date'))[:10]:x for x in ra.get('exposure',{}).get('rows',[])}
+    eb={str(x.get('date'))[:10]:x for x in rb.get('exposure',{}).get('rows',[])}
     for left,right in zip(fa.to_dict('records'),fb.to_dict('records')):
-        paired.append({'date':left['date'],'scheme_a_nav':float((1+fa.portfolio_return_net).cumprod().iloc[len(paired)]),
+        idx=len(paired); day=left['date']; xa,xb=ea.get(day,{}),eb.get(day,{})
+        paired.append({'date':day,'scheme_a_nav':float((1+fa.portfolio_return_net).cumprod().iloc[idx]),
                        'scheme_b_nav':float((1+fb.portfolio_return_net).cumprod().iloc[len(paired)]),
-                       'scheme_a_return':float(left['portfolio_return_net']),'scheme_b_return':float(right['portfolio_return_net'])})
+                       'scheme_a_return':float(left['portfolio_return_net']),'scheme_b_return':float(right['portfolio_return_net']),
+                       'return_delta':float(right['portfolio_return_net']-left['portfolio_return_net']),
+                       'scheme_a_10vt':left.get('final_10vt_multiplier'),'scheme_b_10vt':right.get('final_10vt_multiplier'),
+                       'scheme_a_equity':xa.get('equity'),'scheme_b_equity':xb.get('equity'),
+                       'scheme_a_bond':xa.get('bond'),'scheme_b_bond':xb.get('bond'),
+                       'scheme_a_commodity':xa.get('commodity'),'scheme_b_commodity':xb.get('commodity'),
+                       'scheme_a_turnover':left.get('turnover'),'scheme_b_turnover':right.get('turnover'),
+                       'scheme_a_total_cost':left.get('total_cost'),'scheme_b_total_cost':right.get('total_cost')})
+    top=sorted(paired,key=lambda x:abs(x.get('return_delta') or 0),reverse=True)[:20]
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
-            'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
+            'top_changed_days':top,'comparison_status':'REAL_EXPERIMENTS_COMMON_WINDOW'}
 
 
 
