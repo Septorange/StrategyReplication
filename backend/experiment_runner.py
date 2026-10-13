@@ -67,6 +67,26 @@ def parquet_schema_valid(path: Path, name: str) -> bool:
             return False
     return True
 
+def parquet_rows_valid(path: Path, name: str, expected_rows: int | None) -> bool:
+    rows=pq.ParquetFile(path).metadata.num_rows
+    if expected_rows is None or expected_rows <= 0:
+        return rows > 0
+    return rows == expected_rows if name == 'daily_portfolio.parquet' else rows >= expected_rows
+
+def result_history_rows(result: dict) -> int | None:
+    rows=result.get('history',{}).get('rows')
+    if not isinstance(rows,list) or not rows:
+        return None
+    baseline=result.get('baseline')
+    if isinstance(baseline,dict):
+        observations=baseline.get('observations')
+        if observations is not None:
+            try:
+                if int(observations) != len(rows): return -1
+            except (TypeError,ValueError):
+                return -1
+    return len(rows)
+
 def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) -> dict:
     """Validate the exact artifact contract before advertising CACHE_HIT/PASS."""
     cache_root=CACHE.resolve()
@@ -82,6 +102,9 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
             or result.get('snapshot_id')!=snapshot_id or result.get('cache_key')!=identity_sha256[:16]
             or result.get('adapter_version')!=4):
         raise ValueError('CACHE_INVALID: result identity mismatch')
+    expected_rows=result_history_rows(result)
+    if expected_rows == -1:
+        raise ValueError('CACHE_INVALID: result history and baseline observations disagree')
     if (manifest.get('identity_sha256')!=identity_sha256 or manifest.get('config_hash')!=identity_sha256
             or manifest.get('snapshot_id')!=snapshot_id or manifest.get('cache_key')!=identity_sha256[:16]
             or manifest.get('adapter_version')!=4
@@ -97,7 +120,7 @@ def validate_cache_artifact(dest: Path, identity_sha256: str, snapshot_id: str) 
         if name.endswith('.parquet'):
             try:
                 parquet=pq.ParquetFile(path)
-                if not parquet_schema_valid(path,name):
+                if not parquet_schema_valid(path,name) or not parquet_rows_valid(path,name,expected_rows):
                     raise ValueError
             except Exception as exc:
                 raise ValueError(f'CACHE_INVALID: stage schema invalid {name}') from exc
