@@ -790,13 +790,32 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
         except (OSError,ValueError,TypeError,KeyError):
             return pd.DataFrame(columns=['date','asset','trade_return_net'])
     ta,tb=asset_returns(a),asset_returns(b)
-    ra_asset={(str(r.date),str(r.asset)):float(r.trade_return_net) for r in ta.itertuples()}
-    rb_asset={(str(r.date),str(r.asset)):float(r.trade_return_net) for r in tb.itertuples()}
-    asset_contributions=sorted(({'date':k[0],'asset':k[1],'scheme_a_return':ra_asset.get(k),
-                                 'scheme_b_return':rb_asset.get(k),
-                                 'return_delta':rb_asset.get(k,0)-ra_asset.get(k,0)}
-                                for k in set(ra_asset)|set(rb_asset)),
-                               key=lambda x:abs(x['return_delta'] or 0),reverse=True)[:100]
+    def weighted_contributions(trades,weights,rebalance_costs):
+        if trades.empty or weights.empty: return {}
+        joined=trades.merge(weights[['date','asset','final_weight']],on=['date','asset'],how='inner')
+        raw={(str(r.date),str(r.asset)):float(r.trade_return_net)*float(r.final_weight)
+             for r in joined.itertuples()}
+        by_date={}
+        for (day,_),value in raw.items(): by_date[day]=by_date.get(day,0.0)+abs(value)
+        adjusted={}
+        for key,value in raw.items():
+            day=key[0]; cost=float(rebalance_costs.get(day,0.0) or 0.0)
+            scale=abs(value)/by_date[day] if by_date.get(day) else 0.0
+            adjusted[key]=value-cost*scale
+        return adjusted
+    ca=weighted_contributions(ta,da,{str(r.date):r.portfolio_rebalance_cost for r in fa.itertuples()})
+    cb=weighted_contributions(tb,db,{str(r.date):r.portfolio_rebalance_cost for r in fb.itertuples()})
+    contribution_keys=set(ca)|set(cb)
+    asset_contributions=sorted(({'date':k[0],'asset':k[1],'scheme_a_contribution':ca.get(k),
+                                 'scheme_b_contribution':cb.get(k),
+                                 'contribution_delta':(cb[k]-ca[k]) if k in ca and k in cb else None,
+                                 # Compatibility aliases consumed by the existing
+                                 # table renderer; values are weighted contributions.
+                                 'scheme_a_return':ca.get(k),'scheme_b_return':cb.get(k),
+                                 'return_delta':(cb[k]-ca[k]) if k in ca and k in cb else None}
+                                for k in contribution_keys),
+                               key=lambda x:abs(x['contribution_delta']) if x['contribution_delta'] is not None else -1,
+                               reverse=True)[:100]
     return {'scheme_a':{'scheme_id':a['scheme_id'],'name':a['name'],'run_id':a['run_id'],'evaluation_id':a['evaluation_id'],'snapshot_id':a['snapshot_id'],'config':a['config'],'metrics':ma},
             'scheme_b':{'scheme_id':b['scheme_id'],'name':b['name'],'run_id':b['run_id'],'evaluation_id':b['evaluation_id'],'snapshot_id':b['snapshot_id'],'config':b['config'],'metrics':mb},
             'common_interval':{'from_date':dates[0],'to_date':dates[-1],'observations':len(dates)},'history':paired,
@@ -804,6 +823,7 @@ def compare_saved_experiments(request: CompareExperimentsRequest):
             'top_multiplier_changed_days':by_multiplier,
             'asset_decision_differences':asset_differences,
             'asset_return_contributions':asset_contributions,
+            'asset_contribution_missing_count':sum(x['contribution_delta'] is None for x in asset_contributions),
             'difference_summary':{'cumulative_cost_delta':float(mb.get('total_cost',0)-ma.get('total_cost',0)),
                                   'missing_days_a':missing_a,'missing_days_b':missing_b,
                                   'missing_day_count_a':len(missing_a),'missing_day_count_b':len(missing_b)},
